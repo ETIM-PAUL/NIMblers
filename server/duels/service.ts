@@ -1,22 +1,25 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Difficulty, EntryRow } from '../db/types.ts'
-import { getOrCreateUser } from '../db/users.ts'
+import type { Difficulty, DuelRow, EntryRow } from '../db/types.ts'
+import { getOrCreateUser, getUserAddress } from '../db/users.ts'
 import { confirmStake } from '../entries/service.ts'
 import { submitRun } from '../runs/service.ts'
-import { DEFAULT_LOCK_TTL_MS } from './stateMachine.ts'
+import { DEFAULT_LOCK_TTL_MS, settlementObligations } from './stateMachine.ts'
+import type { SettledDuel } from './stateMachine.ts'
 import type { KeystrokeEvent } from '../../shared/timingEngine.ts'
 import type { HouseWallet } from '../../services/escrow.ts'
+import { payout, refund } from '../../services/escrow.ts'
 
 /**
  * Player B's flow: browse open entries, challenge one (locking it and
- * taking B's stake before the paragraph renders), then submit the race.
- *
- * Deliberately stops at recording B's run. Comparing times, deciding a
- * winner, and paying out are Phase 13's job ("Settlement and payout" —
- * the build plan explicitly places "fetch A's time, compare... pay the
- * winner" and "show the reveal: both times" there, not here).
+ * taking B's stake before the paragraph renders), then submit the race —
+ * which settles the duel immediately: compare both server-recorded times,
+ * apply the house rake, pay the winner (or refund both on a tie), and
+ * hand back the reveal.
  */
+
+/** The house's cut of a decisive win. Ties are refunded in full — nothing is raked from a refund. */
+export const HOUSE_RAKE = 0.1
 
 export interface OpenEntrySummary {
   entryId: string
@@ -127,23 +130,113 @@ export async function challengeEntry(
   return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
 }
 
-export type SubmitChallengeResult = { ok: true } | { ok: false, reason: string }
+export type SubmitChallengeResult =
+  | {
+      ok: true
+      outcome: 'creator' | 'challenger' | 'tie'
+      creatorDurationMs: number
+      challengerDurationMs: number
+      deltaMs: number
+      txHashes: string[]
+    }
+  | { ok: false, reason: string }
+
+function getRunDuration(db: DatabaseSync, runId: string): number {
+  const row = db.prepare('SELECT duration_ms FROM keystroke_runs WHERE id = ?').get(runId) as
+    | { duration_ms: number | null }
+    | undefined
+  if (!row || row.duration_ms === null) throw new Error(`run ${runId} has no recorded duration`)
+  return row.duration_ms
+}
 
 /**
- * Records the challenger's run. Not the settlement — no comparison, no
- * winner, no payout, nothing about A's time here or in the response. That's
- * intentionally left for Phase 13 to add on top of the row this writes.
+ * Compares both server-recorded times, pays out (or refunds a tie), and
+ * marks the duel settled. Reuses the pure Phase 10 `settlementObligations`
+ * for the pre-rake split — lower duration wins, equal durations tie — then
+ * applies the house rake only to a decisive win, never to a tie refund
+ * ("refunding both, minus nothing").
+ *
+ * Safe to call again for an already-settled duel: the comparison is pure
+ * (recomputed identically from persisted durations every time) and
+ * `payout`/`refund` are themselves idempotent per duel, so a retry just
+ * re-derives the same reveal without moving money twice.
  */
-export function submitChallenge(
+async function settleDuel(
   db: DatabaseSync,
+  wallet: HouseWallet,
+  input: { duelId: string, entry: EntryRow, challengerUserId: string, challengerRunId: string },
+): Promise<Extract<SubmitChallengeResult, { ok: true }>> {
+  const creatorDurationMs = getRunDuration(db, input.entry.keystroke_run_id)
+  const challengerDurationMs = getRunDuration(db, input.challengerRunId)
+
+  const winnerUserId =
+    creatorDurationMs === challengerDurationMs
+      ? null
+      : creatorDurationMs < challengerDurationMs
+        ? input.entry.creator_user_id
+        : input.challengerUserId
+
+  const settled: SettledDuel = {
+    status: 'SETTLED',
+    entryId: input.entry.id,
+    creatorUserId: input.entry.creator_user_id,
+    stakeLuna: input.entry.stake_luna,
+    entryExpiresAt: new Date(input.entry.expires_at).getTime(),
+    challengerUserId: input.challengerUserId,
+    winnerUserId,
+  }
+
+  const txHashes: string[] = []
+  for (const obligation of settlementObligations(settled)) {
+    const recipientAddress = getUserAddress(db, obligation.userId)
+    const record =
+      winnerUserId === null
+        ? await refund(db, wallet, {
+            idempotencyKey: `refund-${input.duelId}-${obligation.userId}`,
+            userId: obligation.userId,
+            recipientAddress,
+            valueLuna: obligation.amountLuna,
+          })
+        : await payout(db, wallet, {
+            idempotencyKey: `payout-${input.duelId}`,
+            userId: obligation.userId,
+            recipientAddress,
+            valueLuna: Math.round(obligation.amountLuna * (1 - HOUSE_RAKE)),
+          })
+    if (record.txHash) txHashes.push(record.txHash)
+  }
+
+  db.prepare('UPDATE duels SET winner_user_id = ?, settled_at = ? WHERE id = ?').run(
+    winnerUserId,
+    new Date().toISOString(),
+    input.duelId,
+  )
+  db.prepare("UPDATE entries SET status = 'SETTLED' WHERE id = ?").run(input.entry.id)
+
+  return {
+    ok: true,
+    outcome: winnerUserId === null ? 'tie' : winnerUserId === input.entry.creator_user_id ? 'creator' : 'challenger',
+    creatorDurationMs,
+    challengerDurationMs,
+    deltaMs: Math.abs(creatorDurationMs - challengerDurationMs),
+    txHashes,
+  }
+}
+
+/**
+ * Records the challenger's run, then immediately settles the duel: compare
+ * both times, pay the winner (minus the house rake) or refund a tie, and
+ * return the reveal — both times, the delta, and the transaction hash(es).
+ */
+export async function submitChallenge(
+  db: DatabaseSync,
+  wallet: HouseWallet,
   input: { entryId: string, nimAddress: string, events: KeystrokeEvent[] },
-): SubmitChallengeResult {
+): Promise<SubmitChallengeResult> {
   const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(input.entryId) as EntryRow | undefined
   if (!entry) return { ok: false, reason: 'unknown entry' }
 
-  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(input.entryId) as
-    | { challenger_user_id: string, challenger_keystroke_run_id: string | null }
-    | undefined
+  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(input.entryId) as DuelRow | undefined
   if (!duel) return { ok: false, reason: 'entry has not been challenged' }
 
   const challengerId = getOrCreateUser(db, input.nimAddress)
@@ -151,13 +244,18 @@ export function submitChallenge(
     return { ok: false, reason: 'only the challenger can submit a run for this entry' }
   }
 
-  if (duel.challenger_keystroke_run_id) {
-    return { ok: true } // already recorded — idempotent retry
+  let challengerRunId = duel.challenger_keystroke_run_id
+  if (!challengerRunId) {
+    const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: entry.paragraph_id, events: input.events })
+    if (!runResult.ok) return { ok: false, reason: runResult.reason }
+    challengerRunId = runResult.runId
+    db.prepare('UPDATE duels SET challenger_keystroke_run_id = ? WHERE entry_id = ?').run(challengerRunId, input.entryId)
   }
 
-  const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: entry.paragraph_id, events: input.events })
-  if (!runResult.ok) return { ok: false, reason: runResult.reason }
-
-  db.prepare('UPDATE duels SET challenger_keystroke_run_id = ? WHERE entry_id = ?').run(runResult.runId, input.entryId)
-  return { ok: true }
+  return settleDuel(db, wallet, {
+    duelId: duel.id,
+    entry,
+    challengerUserId: challengerId,
+    challengerRunId,
+  })
 }

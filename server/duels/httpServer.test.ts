@@ -22,10 +22,14 @@ const PARAGRAPH_ID = 'test-paragraph'
 const STAKE_LUNA = 100_000
 
 function fakeWallet(): HouseWallet {
+  let sendCount = 0
   return {
     address: HOUSE_ADDRESS,
     async getBalance() { return 5_000_000 },
-    async send() { throw new Error('should not send in this test') },
+    async send(recipientAddress, valueLuna) {
+      sendCount += 1
+      return { txHash: `settlement-tx-${sendCount}`, senderAddress: HOUSE_ADDRESS, recipientAddress, valueLuna, state: 'confirmed', confirmations: 5 }
+    },
     async getTransaction(txHash): Promise<HouseWalletTransaction | null> {
       const sender = txHash.includes('other') ? OTHER_CHALLENGER_ADDRESS : CHALLENGER_ADDRESS
       return { txHash, senderAddress: sender, recipientAddress: HOUSE_ADDRESS, valueLuna: STAKE_LUNA, state: 'confirmed', confirmations: 5 }
@@ -137,13 +141,14 @@ test('two simultaneous HTTP challenge requests on the same entry produce one loc
   assert.equal(duelCount.c, 1)
 })
 
-test('POST /api/entries/challenge/submit records the run with no duration in the response', async () => {
+test('POST /api/entries/challenge/submit settles the duel and reveals both times, the delta, and a tx hash', async () => {
   await fetch(`${baseUrl}/api/entries/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'submit-test-tx' }),
   })
 
+  // Creator's seeded run is 5000ms; typing at 100ms/char finishes this 8-char target well under that.
   const events = TARGET.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
   const res = await fetch(`${baseUrl}/api/entries/challenge/submit`, {
     method: 'POST',
@@ -152,8 +157,24 @@ test('POST /api/entries/challenge/submit records the run with no duration in the
   })
   const text = await res.text()
   assert.equal(res.status, 201)
-  assert.ok(!/duration/i.test(text), `submit response leaked timing info: ${text}`)
-  assert.deepEqual(JSON.parse(text), { ok: true })
+  const body = JSON.parse(text) as {
+    ok: boolean
+    outcome: string
+    creatorDurationMs: number
+    challengerDurationMs: number
+    deltaMs: number
+    txHashes: string[]
+  }
+  assert.equal(body.ok, true)
+  assert.equal(body.outcome, 'challenger')
+  assert.equal(body.creatorDurationMs, 5000)
+  assert.equal(body.challengerDurationMs, 700)
+  assert.equal(body.deltaMs, 4300)
+  assert.equal(body.txHashes.length, 1)
+
+  const entry = await fetch(`${baseUrl}/api/entries?exclude=nobody`)
+  const entryBody = (await entry.json()) as { entries: unknown[] }
+  assert.equal(entryBody.entries.length, 0, 'a settled entry must no longer appear as open')
 })
 
 test('POST /api/entries/challenge/submit rejects submitting to an unchallenged entry', async () => {

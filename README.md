@@ -55,9 +55,12 @@ all without leaving the app you already have open.
    same stake — and starts a timer for B's own run. If B never finishes, the
    lock expires and the entry reopens for someone else; A's stake is never
    at risk from a challenger who wanders off.
-4. **Winner takes the pot.** The server compares both independently-verified
-   times, takes a small rake, and pays the winner on-chain. Ties refund both
-   sides in full.
+4. **Winner takes the pot.** The instant B's run is recorded, the server
+   compares both independently-verified times, takes a 10% rake, and pays
+   the winner the rest — on-chain, automatically, no manual step. A tie
+   refunds both stakes in full; nothing is raked from a refund. B's
+   response carries the reveal: both times, the delta between them, and
+   the transaction hash, so the outcome is checkable, not just asserted.
 
 The one rule this whole project won't bend on: **the client never reports a
 time.** Every duration is recomputed server-side from the raw keystroke stream,
@@ -119,6 +122,16 @@ so there's nothing to fake.
   that's claimed atomically, so a retry (accidental or malicious) can never
   send twice. `services/escrow.ts` is the *only* module in the codebase
   allowed to touch that wallet.
+- **Settlement:** deciding a winner is a pure comparison — the lower of the
+  two server-recorded durations wins, an exact tie refunds both — reusing
+  the same state-machine logic the duel lifecycle is already property-tested
+  against, so there's no second "who won" implementation to drift out of
+  sync with the first. The comparison, the rake, and the payout/refund
+  calls all re-run identically on a retry (a dropped response, a client
+  resubmit), and since `payout`/`refund` are themselves idempotent per
+  duel, a retry re-derives the same reveal instead of moving money twice —
+  verified by driving the actual settlement twice in a row and asserting
+  only one payout row exists.
 
 ## Try it
 

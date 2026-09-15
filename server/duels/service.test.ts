@@ -22,6 +22,7 @@ function honestEventsFor(target: string): { key: string, tRelativeMs: number, re
   return target.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
 }
 
+/** A wallet whose `send()` throws — for tests that must never reach settlement's payout/refund step. */
 function fakeWallet(): HouseWallet {
   return {
     address: HOUSE_ADDRESS,
@@ -39,6 +40,25 @@ function fakeWallet(): HouseWallet {
       }
     },
     async close() {},
+  }
+}
+
+/** A wallet that actually "sends" (fake tx hashes), for tests that settle a duel. */
+function fakeSettlingWallet(): HouseWallet {
+  let sendCount = 0
+  return {
+    ...fakeWallet(),
+    async send(recipientAddress, valueLuna) {
+      sendCount += 1
+      return {
+        txHash: `settlement-tx-${sendCount}`,
+        senderAddress: HOUSE_ADDRESS,
+        recipientAddress,
+        valueLuna,
+        state: 'confirmed',
+        confirmations: 5,
+      }
+    },
   }
 }
 
@@ -217,8 +237,7 @@ test('a failed stake releases the lock so someone else can challenge', async () 
   assert.equal(retried.ok, true)
 })
 
-async function lockEntryForChallenger(db: DatabaseSync): Promise<void> {
-  const wallet = fakeWallet()
+async function lockEntryForChallenger(db: DatabaseSync, wallet: HouseWallet = fakeWallet()): Promise<void> {
   const result = await challengeEntry(db, wallet, {
     entryId,
     nimAddress: CHALLENGER_ADDRESS,
@@ -227,27 +246,86 @@ async function lockEntryForChallenger(db: DatabaseSync): Promise<void> {
   assert.equal(result.ok, true)
 }
 
-test('submitChallenge records the challenger\'s run with no duration in the response', async () => {
-  await lockEntryForChallenger(db)
+// The seeded creator run in beforeEach() always records duration_ms = 5000.
+// honestEventsFor() types at 100ms/char, so an 8-char target ("hi there")
+// finishes in 700ms — comfortably faster than the creator, i.e. the
+// challenger wins by default in these tests unless a test says otherwise.
+
+test('submitChallenge records the challenger\'s run and settles the duel, revealing both times', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
   const events = honestEventsFor(TARGET)
-  const result = submitChallenge(db, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
 
-  assert.deepEqual(result, { ok: true })
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.outcome, 'challenger')
+  assert.equal(result.creatorDurationMs, 5000)
+  assert.equal(result.challengerDurationMs, 700)
+  assert.equal(result.deltaMs, 4300)
+  assert.equal(result.txHashes.length, 1)
 
-  const duel = db.prepare('SELECT challenger_keystroke_run_id FROM duels WHERE entry_id = ?').get(entryId) as {
+  const duel = db.prepare('SELECT challenger_keystroke_run_id, winner_user_id, settled_at FROM duels WHERE entry_id = ?').get(entryId) as {
     challenger_keystroke_run_id: string | null
+    winner_user_id: string | null
+    settled_at: string | null
   }
   assert.ok(duel.challenger_keystroke_run_id)
+  assert.ok(duel.settled_at)
+  assert.equal(duel.winner_user_id, getOrCreateUser(db, CHALLENGER_ADDRESS))
+
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(entry.status, 'SETTLED')
 })
 
-test('submitChallenge rejects when the entry has not been challenged', () => {
-  const result = submitChallenge(db, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
+test('submitChallenge pays the winner the pot minus the 10% rake', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
+  assert.equal(result.ok, true)
+
+  const winnerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
+  const payoutRow = db.prepare("SELECT * FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(winnerId) as {
+    amount_luna: number
+    tx_hash: string | null
+  }
+  assert.ok(payoutRow, 'expected a PAYOUT row for the winner')
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9))
+  assert.ok(payoutRow.tx_hash)
+})
+
+test('submitChallenge refunds both players in full on a tie, no rake taken', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  // Tie the creator's seeded 5000ms exactly by pushing the final keystroke out.
+  const tieEvents = honestEventsFor(TARGET)
+  tieEvents[tieEvents.length - 1] = { ...tieEvents[tieEvents.length - 1], tRelativeMs: 5000 }
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: tieEvents })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.outcome, 'tie')
+  assert.equal(result.creatorDurationMs, result.challengerDurationMs)
+  assert.equal(result.deltaMs, 0)
+  assert.equal(result.txHashes.length, 2)
+
+  const refundRows = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'REFUND'").all() as { amount_luna: number }[]
+  assert.equal(refundRows.length, 2)
+  for (const row of refundRows) assert.equal(row.amount_luna, STAKE_LUNA, 'a tie refund must not be raked')
+
+  const duel = db.prepare('SELECT winner_user_id FROM duels WHERE entry_id = ?').get(entryId) as { winner_user_id: string | null }
+  assert.equal(duel.winner_user_id, null)
+})
+
+test('submitChallenge rejects when the entry has not been challenged', async () => {
+  const result = await submitChallenge(db, fakeWallet(), { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
   assert.equal(result.ok, false)
 })
 
 test('submitChallenge rejects a submission from someone other than the challenger', async () => {
-  await lockEntryForChallenger(db)
-  const result = submitChallenge(db, {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await submitChallenge(db, wallet, {
     entryId,
     nimAddress: OTHER_CHALLENGER_ADDRESS,
     events: honestEventsFor(TARGET),
@@ -256,10 +334,11 @@ test('submitChallenge rejects a submission from someone other than the challenge
 })
 
 test('submitChallenge rejects a tampered run and records nothing', async () => {
-  await lockEntryForChallenger(db)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
   const events = honestEventsFor(TARGET)
   events[2] = { ...events[2], tRelativeMs: events[1].tRelativeMs - 5 }
-  const result = submitChallenge(db, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
   assert.equal(result.ok, false)
 
   const duel = db.prepare('SELECT challenger_keystroke_run_id FROM duels WHERE entry_id = ?').get(entryId) as {
@@ -268,15 +347,19 @@ test('submitChallenge rejects a tampered run and records nothing', async () => {
   assert.equal(duel.challenger_keystroke_run_id, null)
 })
 
-test('submitChallenge is idempotent — calling it twice records the run once', async () => {
-  await lockEntryForChallenger(db)
+test('submitChallenge is idempotent — calling it twice records the run once and pays out once', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
   const events = honestEventsFor(TARGET)
-  const first = submitChallenge(db, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
-  const second = submitChallenge(db, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
+  const first = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
+  const second = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
 
-  assert.deepEqual(first, { ok: true })
-  assert.deepEqual(second, { ok: true })
+  assert.equal(first.ok, true)
+  assert.deepEqual(first, second, 'a retry must return the exact same reveal, not move money again')
 
   const runCount = db.prepare('SELECT COUNT(*) c FROM keystroke_runs').get() as { c: number }
   assert.equal(runCount.c, 2) // creator's seeded run + challenger's one run, not two
+
+  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'").get() as { c: number }
+  assert.equal(payoutCount.c, 1, 'a retry must not pay out twice')
 })

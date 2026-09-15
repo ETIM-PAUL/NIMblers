@@ -315,6 +315,38 @@ button {
   color: var(--text-dim);
 }
 
+.reveal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reveal-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.reveal-row span:first-child {
+  color: var(--text-dim);
+}
+
+.reveal-row span:last-child {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.reveal-tx {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
 /* Sections */
 
 .section {

@@ -17,14 +17,26 @@ interface OpenEntry {
   createdAt: string
 }
 
+interface Reveal {
+  outcome: 'creator' | 'challenger' | 'tie'
+  creatorDurationMs: number
+  challengerDurationMs: number
+  deltaMs: number
+  txHashes: string[]
+}
+
 type Stage =
   | { name: 'browsing' }
   | { name: 'staking', entryId: string }
   | { name: 'challenging', entryId: string, stakeTxHash: string }
   | { name: 'typing', entryId: string, paragraph: string }
   | { name: 'submitting', entryId: string }
-  | { name: 'submitted' }
+  | { name: 'submitted', reveal: Reveal }
   | { name: 'error', message: string }
+
+function formatSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(2)}s`
+}
 
 export function ChallengeBrowser({ address, sendPayment }: Props) {
   const [stage, setStage] = useState<Stage>({ name: 'browsing' })
@@ -83,8 +95,8 @@ export function ChallengeBrowser({ address, sendPayment }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entryId, nimAddress: address, events: run.events }),
       })
-      await readJsonOrThrow(res, 'Could not submit your run')
-      setStage({ name: 'submitted' })
+      const body = await readJsonOrThrow(res, 'Could not submit your run')
+      setStage({ name: 'submitted', reveal: body as unknown as Reveal })
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error) })
@@ -153,10 +165,33 @@ export function ChallengeBrowser({ address, sendPayment }: Props) {
   }
 
   if (stage.name === 'submitted') {
+    const { reveal } = stage
+    const youWon = reveal.outcome === 'challenger'
+    const headline = reveal.outcome === 'tie'
+      ? "It's a tie — both stakes refunded in full."
+      : youWon
+        ? 'You won!'
+        : 'You lost this one.'
     return (
       <div className="duel-panel">
-        <p className="section-note-best">Run submitted!</p>
-        <p className="section-note">Results aren't settled yet — that's coming in a later phase.</p>
+        <p className={reveal.outcome === 'challenger' ? 'section-note-best' : 'section-note'}>{headline}</p>
+        <div className="reveal-card">
+          <div className="reveal-row">
+            <span>Opponent</span>
+            <span>{formatSeconds(reveal.creatorDurationMs)}</span>
+          </div>
+          <div className="reveal-row">
+            <span>You</span>
+            <span>{formatSeconds(reveal.challengerDurationMs)}</span>
+          </div>
+          <div className="reveal-row">
+            <span>Delta</span>
+            <span>{formatSeconds(reveal.deltaMs)}</span>
+          </div>
+        </div>
+        {reveal.txHashes.map((hash) => (
+          <p key={hash} className="reveal-tx">{hash}</p>
+        ))}
         <button type="button" className="btn btn-secondary" onClick={() => setStage({ name: 'browsing' })}>
           Back to open duels
         </button>

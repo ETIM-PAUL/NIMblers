@@ -7,10 +7,10 @@ import { challengeEntry, listOpenEntries, submitChallenge } from './service.ts'
 
 /**
  * Registers Player B's flow: browse open entries, challenge one (stake
- * first, then the paragraph renders), then submit the race. See
- * server/duels/service.ts for why this deliberately stops short of
- * settlement — no winner, no payout, nothing about A's time in any of
- * these responses either.
+ * first, then the paragraph renders), then submit the race — which
+ * settles the duel and returns the reveal. The challenge response still
+ * carries no trace of A's time; only the settlement response does, once
+ * the duel is actually decided.
  */
 export function registerDuelRoutes(router: Router): void {
   router.get('/api/entries', (req, res) => {
@@ -77,11 +77,17 @@ export function registerDuelRoutes(router: Router): void {
       return
     }
 
-    const result = submitChallenge(getDb(), { entryId: body.entryId, nimAddress: body.nimAddress, events })
-    if (!result.ok) {
-      sendJson(res, 422, { error: result.reason })
-      return
+    try {
+      const wallet = await getHouseWallet()
+      const result = await submitChallenge(getDb(), wallet, { entryId: body.entryId, nimAddress: body.nimAddress, events })
+      if (!result.ok) {
+        sendJson(res, 422, { error: result.reason })
+        return
+      }
+      sendJson(res, 201, result)
     }
-    sendJson(res, 201, { ok: true })
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
   })
 }

@@ -16,3 +16,12 @@ export function getOrCreateUser(db: DatabaseSync, nimAddress: string): string {
   )
   return id
 }
+
+/** The inverse of {@link getOrCreateUser} — where a payout or refund actually gets sent. */
+export function getUserAddress(db: DatabaseSync, userId: string): string {
+  const row = db.prepare('SELECT nim_address FROM users WHERE id = ?').get(userId) as
+    | { nim_address: string }
+    | undefined
+  if (!row) throw new Error(`unknown user ${userId}`)
+  return row.nim_address
+}

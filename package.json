@@ -13,9 +13,11 @@
     "db:migrate:status": "node --experimental-strip-types server/db/migrate.ts status",
     "db:seed": "node --experimental-strip-types server/db/seed.ts",
     "server": "node --experimental-strip-types server/index.ts",
-    "test": "node --experimental-strip-types --test server/**/*.test.ts shared/**/*.test.ts src/**/*.test.ts"
+    "escrow:demo": "node --env-file-if-exists=.env --experimental-strip-types scripts/escrow-testnet-demo.ts",
+    "test": "node --experimental-strip-types --test server/**/*.test.ts services/**/*.test.ts shared/**/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {
+    "@nimiq/core": "^2.21.0",
     "@nimiq/mini-app-sdk": "^0.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

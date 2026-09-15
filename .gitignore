@@ -13,6 +13,7 @@ dist-ssr
 *.local
 
 .agents/*
+.claude/
 
 # Internal planning doc — not part of the public repo
 typing-duel-build-plan.md

@@ -87,9 +87,14 @@ so there's nothing to fake.
 - **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
   only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
   creation — so a duel's stake can't sit in a trustless on-chain contract
-  waiting for a winner to be decided. A house wallet holds both stakes and
-  releases them once the server has resolved the duel. That trade-off is
-  deliberate and stated up front, not hidden in the fine print.
+  waiting for a winner to be decided. A house wallet, run by a real
+  `@nimiq/core` light client, holds both stakes and releases them once the
+  server has resolved the duel. That trade-off is deliberate and stated up
+  front, not hidden in the fine print. Every movement — a stake received, a
+  payout, a refund — is written to one ledger keyed by an idempotency key
+  that's claimed atomically, so a retry (accidental or malicious) can never
+  send twice. `services/escrow.ts` is the *only* module in the codebase
+  allowed to touch that wallet.
 
 ## Try it
 
@@ -120,7 +125,38 @@ server/
   db/               Schema, migrations, seed data
   paragraphs/       Deterministic daily paragraph + practice-pool logic
   runs/             POST /api/runs — server-side keystroke replay and validation
+services/
+  escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance
+  nimiqWallet.ts    House wallet client (real @nimiq/core testnet light client)
+scripts/            One-off scripts, e.g. a live testnet escrow demo
 ```
+
+## House wallet setup (testnet)
+
+`services/escrow.ts` needs a funded testnet house wallet:
+
+```bash
+node -e "import('@nimiq/core').then(N => console.log(N.PrivateKey.generate().toHex()))"
+```
+
+Put the result in `.env` as `ESCROW_PRIVATE_KEY` (never commit this — it's
+gitignored, and it must never be a mainnet key). Then fund that address from
+Nimiq Pay's testnet faucet: long-press the settings button for 10 seconds to
+reveal the dev menu, switch to Testnet, and use "Get free NIM."
+
+```bash
+npm run escrow:demo
+```
+
+runs a full live-testnet round trip against the real network: connect,
+receive a stake, refund it, and prove `payout()` sent only once when called
+twice with the same idempotency key. A Nimiq light client needs a stable,
+long-lived WebSocket connection to the network to establish consensus —
+some restrictive environments (strict corporate proxies, some sandboxed CI
+runners) can prevent that entirely; if the script times out waiting for
+consensus, try it from a normal dev machine's network instead. The
+idempotency guarantee itself doesn't depend on any of that — it's covered
+by `services/escrow.test.ts` against a fake wallet, no network required.
 
 ## Everything currently testnet-only
 

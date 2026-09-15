@@ -59,7 +59,14 @@ function App() {
         <section className="section">
           <h2 className="section-title">Practice</h2>
           {durationMs !== null
-            ? <p className="section-note">Matched in {Math.round(durationMs)}ms. (Nothing is saved yet.)</p>
+            ? (
+                <>
+                  <p className="section-note">Matched in {Math.round(durationMs)}ms. (Nothing is saved yet.)</p>
+                  <button type="button" className="btn btn-primary" onClick={() => setDurationMs(null)}>
+                    Play again
+                  </button>
+                </>
+              )
             : (
                 <TypingEngine
                   paragraph={DEMO_PARAGRAPH}

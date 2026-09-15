@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
-import { applyKeydown, computeCharStates, isExactMatch } from '../lib/typingEngine'
-import type { KeystrokeRun } from '../lib/timingEngine'
-import { EMPTY_RECORDER_STATE, recordKeystroke } from '../lib/timingEngine'
+import { applyKeydown, computeCharStates, isExactMatch } from '../../shared/typingEngine'
+import type { KeystrokeRun } from '../../shared/timingEngine'
+import { EMPTY_RECORDER_STATE, recordKeystroke } from '../../shared/timingEngine'
 
 interface Props {
   paragraph: string

@@ -69,9 +69,15 @@ so there's nothing to fake.
 
 - **Frontend:** Vite + React + TypeScript, talking to Nimiq Pay through
   `@nimiq/mini-app-sdk`
+- **API:** Node's built-in `http` module — no routing framework dependency for
+  the handful of routes there are so far
 - **Data:** SQLite via Node's built-in `node:sqlite` — the entire data layer
   ships with zero extra dependencies
 - **Tests:** Node's built-in test runner — no test framework dependency either
+- **Shared core:** the exact same replay logic the typing UI uses to build a
+  keystroke stream is what the server uses to independently re-verify it — one
+  implementation in `shared/`, imported by both sides, so there's no separate
+  "server's opinion of how typing works" to drift out of sync
 - **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
   only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
   creation — so a duel's stake can't sit in a trustless on-chain contract
@@ -94,17 +100,20 @@ Wi-Fi network. Opened in a regular browser instead, the app shows a clear
 ```bash
 npm run db:migrate   # set up the local schema
 npm run db:seed      # seed the paragraph pool + a sample open entry
-npm test              # run the test suite
-npm run build          # typecheck everything + production build
+npm run server        # start the API on :8787
+npm test               # run the test suite
+npm run build           # typecheck everything + production build
 ```
 
 ## Project layout
 
 ```
 src/                React app — UI, wallet connection, typing engine
+shared/             Typing + timing replay logic used by both client and server
 server/
   db/               Schema, migrations, seed data
   paragraphs/       Deterministic daily paragraph + practice-pool logic
+  runs/             POST /api/runs — server-side keystroke replay and validation
 ```
 
 ## Everything currently testnet-only

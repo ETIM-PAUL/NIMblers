@@ -119,6 +119,33 @@ test('challengeEntry locks the entry, takes the stake, and reveals the paragraph
   assert.equal(duel.challenger_user_id, challengerId)
 })
 
+test('challengeEntry requires matching this specific entry\'s stake, not a fixed global amount', async () => {
+  // A pricier ("hard") entry, staked at 500,000 Luna instead of this
+  // file's 100,000-Luna default.
+  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  const pricierEntryId = randomUUID()
+  const runId = randomUUID()
+  const now = new Date().toISOString()
+  db.prepare(
+    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(runId, creatorId, PARAGRAPH_ID, '[]', 5000, now)
+  db.prepare(
+    `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
+     VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
+  ).run(pricierEntryId, creatorId, PARAGRAPH_ID, runId, 500_000, now, new Date(Date.now() + 86_400_000).toISOString(), 'pricier-stake-tx')
+
+  const wallet = fakeWallet() // always reports a 100,000-Luna transaction
+  const result = await challengeEntry(db, wallet, {
+    entryId: pricierEntryId,
+    nimAddress: CHALLENGER_ADDRESS,
+    stakeTxHash: 'challenger-underpay-tx',
+  })
+
+  assert.equal(result.ok, false, 'a 100,000-Luna stake must not be accepted for a 500,000-Luna entry')
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(pricierEntryId) as { status: string }
+  assert.equal(entry.status, 'OPEN', 'the lock must be released after the mismatched stake is rejected')
+})
+
 test('challengeEntry rejects challenging your own entry', async () => {
   const wallet = fakeWallet()
   const result = await challengeEntry(db, wallet, {

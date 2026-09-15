@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { EntryRow } from '../db/types.ts'
+import type { Difficulty, EntryRow } from '../db/types.ts'
 import { getOrCreateUser } from '../db/users.ts'
 import { confirmStake } from '../entries/service.ts'
 import { submitRun } from '../runs/service.ts'
@@ -22,21 +22,23 @@ export interface OpenEntrySummary {
   entryId: string
   creatorAddress: string
   stakeLuna: number
+  difficulty: Difficulty
   createdAt: string
 }
 
-/** Opponent address, stake, and age only — never a time. Excludes the caller's own entries and anything past its 24h window. */
+/** Opponent address, stake, difficulty, and age only — never a time. Excludes the caller's own entries and anything past its 24h window. */
 export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): OpenEntrySummary[] {
   const nowIso = new Date().toISOString()
   const rows = db
     .prepare(
-      `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, e.created_at
+      `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
+       JOIN paragraphs p ON p.id = e.paragraph_id
        WHERE e.status = 'OPEN' AND e.expires_at > ?
        ORDER BY e.created_at ASC`,
     )
-    .all(nowIso) as { entry_id: string, creator_address: string, stake_luna: number, created_at: string }[]
+    .all(nowIso) as { entry_id: string, creator_address: string, stake_luna: number, difficulty: Difficulty, created_at: string }[]
 
   return rows
     .filter((row) => row.creator_address !== excludeNimAddress)
@@ -44,6 +46,7 @@ export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): O
       entryId: row.entry_id,
       creatorAddress: row.creator_address,
       stakeLuna: row.stake_luna,
+      difficulty: row.difficulty,
       createdAt: row.created_at,
     }))
 }
@@ -102,7 +105,10 @@ export async function challengeEntry(
     return { ok: false, reason: 'entry is no longer open' }
   }
 
-  const stake = await confirmStake(db, wallet, challengerId, input)
+  // B must match this specific entry's stake — its own recorded amount is
+  // the authority here, not a difficulty lookup, since the entry already
+  // pins the tier (and therefore the amount) it was created at.
+  const stake = await confirmStake(db, wallet, challengerId, { ...input, valueLuna: entry.stake_luna })
   if (!stake.ok) {
     // We held the lock; a failed stake releases it for someone else to try.
     db.prepare("UPDATE entries SET status = 'OPEN' WHERE id = ?").run(input.entryId)

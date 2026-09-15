@@ -5,7 +5,7 @@ import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getDailyParagraphForToday } from '../paragraphs/repository.ts'
 import { PARAGRAPH_POOL } from '../paragraphs/pool-data.ts'
-import { createEntry, DUEL_STAKE_LUNA, revealEntry } from './service.ts'
+import { createEntry, DUEL_STAKE_LUNA_BY_DIFFICULTY, revealEntry } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -18,7 +18,7 @@ function confirmedStakeTx(overrides: Partial<HouseWalletTransaction> = {}): Hous
     txHash: 'stake-tx-1',
     senderAddress: PLAYER_ADDRESS,
     recipientAddress: HOUSE_ADDRESS,
-    valueLuna: DUEL_STAKE_LUNA,
+    valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY.easy,
     state: 'confirmed',
     confirmations: 5,
     ...overrides,
@@ -58,36 +58,48 @@ beforeEach(() => {
   for (const p of PARAGRAPH_POOL) insert.run(p.id, p.body, p.difficulty, now)
 })
 
-test('revealEntry verifies the stake and reveals today\'s daily paragraph', async () => {
+test('revealEntry verifies the stake and reveals today\'s daily paragraph for that difficulty', async () => {
   const wallet = createFakeWallet()
-  const result = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1' })
+  const result = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' })
 
   assert.equal(result.ok, true)
   if (!result.ok) return
-  const today = getDailyParagraphForToday(db)
+  const today = getDailyParagraphForToday(db, 'easy')
   assert.equal(result.paragraphId, today.id)
   assert.equal(result.paragraphBody, today.body)
 })
 
+test('revealEntry rejects when the stake amount does not match the difficulty tier', async () => {
+  // Claims "hard" (5 NIM) but the on-chain transaction only carries the
+  // easy tier's 1 NIM.
+  const wallet = createFakeWallet()
+  const result = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'hard' })
+  assert.equal(result.ok, false)
+})
+
 test('revealEntry rejects when the stake transaction cannot be verified', async () => {
   const wallet = createFakeWallet({ async getTransaction() { return null } })
-  const result = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'does-not-exist' })
+  const result = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'does-not-exist', difficulty: 'easy' })
   assert.equal(result.ok, false)
 })
 
 test('revealEntry called twice with the same stakeTxHash does not re-check the chain', async () => {
   const wallet = createFakeWallet()
-  await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1' })
-  await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1' })
+  await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' })
+  await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' })
   assert.equal(wallet.getTransactionCalls, 1)
 })
 
-test('createEntry creates an OPEN entry and the result never contains a duration', async () => {
-  const wallet = createFakeWallet()
-  const today = getDailyParagraphForToday(db)
+test('createEntry creates an OPEN entry at the tier\'s stake amount, and the result never contains a duration', async () => {
+  const wallet = createFakeWallet({
+    async getTransaction(txHash) {
+      return txHash === 'stake-tx-1' ? confirmedStakeTx({ valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY.medium }) : null
+    },
+  })
+  const today = getDailyParagraphForToday(db, 'medium')
   const events = honestEventsFor(today.body)
 
-  const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', events })
+  const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'medium', events })
 
   assert.equal(result.ok, true)
   if (!result.ok) return
@@ -108,18 +120,41 @@ test('createEntry creates an OPEN entry and the result never contains a duration
   }
   assert.equal(row.status, 'OPEN')
   assert.equal(row.paragraph_id, today.id)
-  assert.equal(row.stake_luna, DUEL_STAKE_LUNA)
+  assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY.medium)
   assert.equal(row.stake_tx_hash, 'stake-tx-1')
 })
 
-test('createEntry rejects a run that does not match today\'s daily paragraph', async () => {
+test('each difficulty tier requires its own stake amount', async () => {
+  for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+    const wallet = createFakeWallet({
+      async getTransaction(txHash) {
+        return txHash === `stake-${difficulty}`
+          ? confirmedStakeTx({ txHash: `stake-${difficulty}`, valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY[difficulty] })
+          : null
+      },
+    })
+    const today = getDailyParagraphForToday(db, difficulty)
+    const result = await createEntry(db, wallet, {
+      nimAddress: PLAYER_ADDRESS,
+      stakeTxHash: `stake-${difficulty}`,
+      difficulty,
+      events: honestEventsFor(today.body),
+    })
+    assert.equal(result.ok, true, `${difficulty} entry should be created with its own ${DUEL_STAKE_LUNA_BY_DIFFICULTY[difficulty]} Luna stake`)
+    if (!result.ok) continue
+    const row = db.prepare('SELECT stake_luna FROM entries WHERE id = ?').get(result.entryId) as { stake_luna: number }
+    assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY[difficulty])
+  }
+})
+
+test('createEntry rejects a run that does not match today\'s daily paragraph for that difficulty', async () => {
   const wallet = createFakeWallet()
   // Events spell out a completely different paragraph than what the server
   // would have revealed — even if the client claims a different paragraphId,
   // createEntry never trusts it; it independently re-derives today's paragraph.
   const events = honestEventsFor('this is definitely not the daily paragraph')
 
-  const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', events })
+  const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy', events })
   assert.equal(result.ok, false)
 
   const count = db.prepare('SELECT COUNT(*) c FROM entries').get() as { c: number }
@@ -128,10 +163,10 @@ test('createEntry rejects a run that does not match today\'s daily paragraph', a
 
 test('createEntry rejects when the stake cannot be verified, and creates no entry', async () => {
   const wallet = createFakeWallet({ async getTransaction() { return null } })
-  const today = getDailyParagraphForToday(db)
+  const today = getDailyParagraphForToday(db, 'easy')
   const events = honestEventsFor(today.body)
 
-  const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'nope', events })
+  const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'nope', difficulty: 'easy', events })
   assert.equal(result.ok, false)
 
   const count = db.prepare('SELECT COUNT(*) c FROM entries').get() as { c: number }
@@ -140,9 +175,9 @@ test('createEntry rejects when the stake cannot be verified, and creates no entr
 
 test('createEntry is idempotent per stakeTxHash — a retried submit returns the same entry, not a second one', async () => {
   const wallet = createFakeWallet()
-  const today = getDailyParagraphForToday(db)
+  const today = getDailyParagraphForToday(db, 'easy')
   const events = honestEventsFor(today.body)
-  const input = { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', events }
+  const input = { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' as const, events }
 
   const first = await createEntry(db, wallet, input)
   const second = await createEntry(db, wallet, input)
@@ -156,7 +191,7 @@ test('a stake with no completed submission creates no entry — closing the tab 
   const wallet = createFakeWallet()
 
   // A stakes and the paragraph is revealed...
-  const revealed = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1' })
+  const revealed = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' })
   assert.equal(revealed.ok, true)
 
   // ...but A closes the tab and never calls createEntry.
@@ -169,7 +204,7 @@ test('a stake with no completed submission creates no entry — closing the tab 
     | { amount_luna: number, tx_hash: string }
     | undefined
   assert.ok(payout, 'the stake itself was still received and recorded')
-  assert.equal(payout.amount_luna, DUEL_STAKE_LUNA)
+  assert.equal(payout.amount_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY.easy)
   assert.equal(payout.tx_hash, 'stake-tx-1')
 
   // Phase 14's expiry/refund job only ever operates on `entries` rows —

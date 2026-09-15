@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import { errorMessage, fetchHouseAddress, formatAge, formatLuna, readJsonOrThrow } from '../lib/api'
+import type { Difficulty } from '../lib/api'
+import { DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatAge, formatLuna, readJsonOrThrow } from '../lib/api'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -12,6 +13,7 @@ interface OpenEntry {
   entryId: string
   creatorAddress: string
   stakeLuna: number
+  difficulty: Difficulty
   createdAt: string
 }
 
@@ -101,7 +103,9 @@ export function ChallengeBrowser({ address, sendPayment }: Props) {
               <li key={entry.entryId} className="entry-list-item">
                 <div className="entry-list-info">
                   <span className="entry-list-address">{entry.creatorAddress}</span>
-                  <span className="entry-list-meta">{formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}</span>
+                  <span className="entry-list-meta">
+                    {DIFFICULTY_LABELS[entry.difficulty]} · {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                  </span>
                 </div>
                 <button
                   type="button"

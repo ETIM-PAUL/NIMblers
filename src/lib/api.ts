@@ -1,3 +1,8 @@
+export type Difficulty = 'easy' | 'medium' | 'hard'
+
+export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
+export const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -14,13 +19,13 @@ export async function readJsonOrThrow(res: Response, fallback: string): Promise<
 
 export interface HouseAddressInfo {
   address: string
-  stakeLuna: number
+  stakes: Record<Difficulty, number>
 }
 
 export async function fetchHouseAddress(): Promise<HouseAddressInfo> {
   const res = await fetch('/api/house-address')
   const body = await readJsonOrThrow(res, 'Could not reach the house wallet')
-  return { address: body.address as string, stakeLuna: body.stakeLuna as number }
+  return { address: body.address as string, stakes: body.stakes as Record<Difficulty, number> }
 }
 
 /** "5m ago", "2h ago", "3d ago" — coarse enough that it never needs a live-updating clock. */

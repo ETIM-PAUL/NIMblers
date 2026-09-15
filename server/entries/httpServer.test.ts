@@ -9,7 +9,7 @@ import { PARAGRAPH_POOL } from '../paragraphs/pool-data.ts'
 import { createRouter } from '../http/router.ts'
 import { registerEntryRoutes } from './httpServer.ts'
 import { setHouseWalletFactoryForTesting, setHouseWalletForTesting } from './houseWallet.ts'
-import { DUEL_STAKE_LUNA } from './service.ts'
+import { DUEL_STAKE_LUNA_BY_DIFFICULTY } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -22,7 +22,7 @@ function confirmedStakeTx(overrides: Partial<HouseWalletTransaction> = {}): Hous
     txHash: 'stake-tx-1',
     senderAddress: PLAYER_ADDRESS,
     recipientAddress: HOUSE_ADDRESS,
-    valueLuna: DUEL_STAKE_LUNA,
+    valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY.easy,
     state: 'confirmed',
     confirmations: 5,
     ...overrides,
@@ -75,26 +75,26 @@ function assertNoDurationLeak(responseText: string): void {
   )
 }
 
-test('GET /api/house-address returns the wallet address and the fixed stake amount', async () => {
+test('GET /api/house-address returns the wallet address and the stake amount per difficulty', async () => {
   const res = await fetch(`${baseUrl}/api/house-address`)
   assert.equal(res.status, 200)
-  const body = (await res.json()) as { address: string, stakeLuna: number }
+  const body = (await res.json()) as { address: string, stakes: Record<string, number> }
   assert.equal(body.address, HOUSE_ADDRESS)
-  assert.equal(body.stakeLuna, DUEL_STAKE_LUNA)
+  assert.deepEqual(body.stakes, DUEL_STAKE_LUNA_BY_DIFFICULTY)
 })
 
-test('POST /api/entries/reveal verifies the stake and reveals today\'s paragraph, with no timing data', async () => {
+test('POST /api/entries/reveal verifies the stake and reveals today\'s paragraph for that difficulty, with no timing data', async () => {
   const res = await fetch(`${baseUrl}/api/entries/reveal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1' }),
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' }),
   })
   const text = await res.text()
   assert.equal(res.status, 200)
   assertNoDurationLeak(text)
 
   const body = JSON.parse(text) as { paragraphId: string, paragraphBody: string }
-  const today = getDailyParagraphForToday(getDb())
+  const today = getDailyParagraphForToday(getDb(), 'easy')
   assert.equal(body.paragraphId, today.id)
   assert.equal(body.paragraphBody, today.body)
 })
@@ -103,19 +103,39 @@ test('POST /api/entries/reveal rejects an unverifiable stake', async () => {
   const res = await fetch(`${baseUrl}/api/entries/reveal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'nonexistent' }),
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'nonexistent', difficulty: 'easy' }),
   })
   assert.equal(res.status, 422)
 })
 
-test('POST /api/entries creates an OPEN entry, and the response never mentions a duration', async () => {
-  const today = getDailyParagraphForToday(getDb())
+test('POST /api/entries/reveal rejects a missing or invalid difficulty', async () => {
+  const res = await fetch(`${baseUrl}/api/entries/reveal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'nightmare' }),
+  })
+  assert.equal(res.status, 400)
+})
+
+test('POST /api/entries creates an OPEN entry at the difficulty\'s stake amount, and the response never mentions a duration', async () => {
+  setHouseWalletForTesting({
+    ...fakeWallet(),
+    async getTransaction(txHash) {
+      return confirmedStakeTx({ txHash, valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY.hard })
+    },
+  })
+  const today = getDailyParagraphForToday(getDb(), 'hard')
   const events = today.body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
 
   const res = await fetch(`${baseUrl}/api/entries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', events }),
+    body: JSON.stringify({
+      nimAddress: PLAYER_ADDRESS,
+      stakeTxHash: 'stake-tx-hard',
+      difficulty: 'hard',
+      events,
+    }),
   })
   const text = await res.text()
   assert.equal(res.status, 201)
@@ -127,17 +147,20 @@ test('POST /api/entries creates an OPEN entry, and the response never mentions a
   assert.ok(body.expiresAt)
   // Exactly these three keys — nothing extra snuck into the response.
   assert.deepEqual(Object.keys(body).sort(), ['entryId', 'expiresAt', 'status'])
+
+  const row = getDb().prepare('SELECT stake_luna FROM entries WHERE id = ?').get(body.entryId) as { stake_luna: number }
+  assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY.hard)
 })
 
 test('POST /api/entries with a tampered run is rejected, with no timing data in the error response either', async () => {
-  const today = getDailyParagraphForToday(getDb())
+  const today = getDailyParagraphForToday(getDb(), 'easy')
   const events = today.body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
   events[2] = { ...events[2], tRelativeMs: events[1].tRelativeMs - 5 } // edited timestamp
 
   const res = await fetch(`${baseUrl}/api/entries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-tampered', events }),
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-tampered', difficulty: 'easy', events }),
   })
   const text = await res.text()
   assert.equal(res.status, 422)
@@ -159,7 +182,7 @@ test('a house wallet connection failure returns 503 instead of hanging the reque
   const res = await fetch(`${baseUrl}/api/entries/reveal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'whatever' }),
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'whatever', difficulty: 'easy' }),
   })
   assert.equal(res.status, 503)
   const body = (await res.json()) as { error: string }

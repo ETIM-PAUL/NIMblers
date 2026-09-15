@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { EntryStatus } from '../db/types.ts'
+import type { Difficulty, EntryStatus } from '../db/types.ts'
 import { getOrCreateUser } from '../db/users.ts'
 import { getDailyParagraphForToday } from '../paragraphs/repository.ts'
 import { submitRun } from '../runs/service.ts'
@@ -9,8 +9,12 @@ import type { KeystrokeEvent } from '../../shared/timingEngine.ts'
 import type { HouseWallet } from '../../services/escrow.ts'
 import { receiveStake } from '../../services/escrow.ts'
 
-/** Fixed wager for every duel — 1 NIM. */
-export const DUEL_STAKE_LUNA = 100_000
+/** Fixed wager per difficulty tier. */
+export const DUEL_STAKE_LUNA_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 100_000, // 1 NIM
+  medium: 300_000, // 3 NIM
+  hard: 500_000, // 5 NIM
+}
 
 function stakeIdempotencyKey(stakeTxHash: string): string {
   return `stake-${stakeTxHash}`
@@ -20,14 +24,14 @@ export async function confirmStake(
   db: DatabaseSync,
   wallet: HouseWallet,
   userId: string,
-  input: { nimAddress: string, stakeTxHash: string },
+  input: { nimAddress: string, stakeTxHash: string, valueLuna: number },
 ): Promise<{ ok: true } | { ok: false, reason: string }> {
   try {
     await receiveStake(db, wallet, {
       idempotencyKey: stakeIdempotencyKey(input.stakeTxHash),
       userId,
       fromAddress: input.nimAddress,
-      valueLuna: DUEL_STAKE_LUNA,
+      valueLuna: input.valueLuna,
       txHash: input.stakeTxHash,
     })
     return { ok: true }
@@ -43,22 +47,26 @@ export type RevealResult =
 
 /**
  * The "stake first" half of Player A's flow: independently verifies the
- * stake transaction on-chain, then — and only then — reveals the
- * paragraph. Calling this again with the same `stakeTxHash` is safe and
- * cheap: the stake was already verified, so `receiveStake` returns the
- * existing ledger row without touching the chain a second time.
+ * stake transaction on-chain for the amount this difficulty tier requires,
+ * then — and only then — reveals that tier's daily paragraph. Calling this
+ * again with the same `stakeTxHash` is safe and cheap: the stake was
+ * already verified, so `receiveStake` returns the existing ledger row
+ * without touching the chain a second time.
  */
 export async function revealEntry(
   db: DatabaseSync,
   wallet: HouseWallet,
-  input: { nimAddress: string, stakeTxHash: string },
+  input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty },
 ): Promise<RevealResult> {
   const userId = getOrCreateUser(db, input.nimAddress)
 
-  const stake = await confirmStake(db, wallet, userId, input)
+  const stake = await confirmStake(db, wallet, userId, {
+    ...input,
+    valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY[input.difficulty],
+  })
   if (!stake.ok) return stake
 
-  const paragraph = getDailyParagraphForToday(db)
+  const paragraph = getDailyParagraphForToday(db, input.difficulty)
   return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
 }
 
@@ -69,11 +77,12 @@ export type CreateEntryResult =
 /**
  * The "submit" half: re-confirms the stake (idempotent — a no-op if
  * `revealEntry` already verified it), independently re-derives today's
- * daily paragraph — never trusts a client-supplied paragraph id, which
- * would let someone submit a run against an easier practice paragraph and
- * claim it was the daily one — validates the run through the same replay
- * and integrity pipeline every run goes through, and only then creates the
- * OPEN entry.
+ * daily paragraph for the claimed difficulty — never trusts a
+ * client-supplied paragraph id, which would let someone submit a run
+ * against an easier practice paragraph and claim it was the daily one —
+ * validates the run through the same replay and integrity pipeline every
+ * run goes through, and only then creates the OPEN entry at that tier's
+ * stake amount.
  *
  * Idempotent per `stakeTxHash`: one stake transaction can only ever back
  * one entry (enforced by a UNIQUE index, not just this check), so a
@@ -87,7 +96,7 @@ export type CreateEntryResult =
 export async function createEntry(
   db: DatabaseSync,
   wallet: HouseWallet,
-  input: { nimAddress: string, stakeTxHash: string, events: KeystrokeEvent[] },
+  input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty, events: KeystrokeEvent[] },
 ): Promise<CreateEntryResult> {
   const existing = db
     .prepare('SELECT id, status, expires_at FROM entries WHERE stake_tx_hash = ?')
@@ -97,11 +106,12 @@ export async function createEntry(
   }
 
   const userId = getOrCreateUser(db, input.nimAddress)
+  const stakeLuna = DUEL_STAKE_LUNA_BY_DIFFICULTY[input.difficulty]
 
-  const stake = await confirmStake(db, wallet, userId, input)
+  const stake = await confirmStake(db, wallet, userId, { ...input, valueLuna: stakeLuna })
   if (!stake.ok) return stake
 
-  const paragraph = getDailyParagraphForToday(db)
+  const paragraph = getDailyParagraphForToday(db, input.difficulty)
   const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: paragraph.id, events: input.events })
   if (!runResult.ok) {
     return { ok: false, reason: runResult.reason }
@@ -114,7 +124,7 @@ export async function createEntry(
     `INSERT INTO entries
       (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
       VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
-  ).run(entryId, userId, paragraph.id, runResult.runId, DUEL_STAKE_LUNA, now.toISOString(), expiresAt, input.stakeTxHash)
+  ).run(entryId, userId, paragraph.id, runResult.runId, stakeLuna, now.toISOString(), expiresAt, input.stakeTxHash)
 
   return { ok: true, entryId, status: 'OPEN', expiresAt }
 }

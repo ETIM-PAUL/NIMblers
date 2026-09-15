@@ -1,14 +1,12 @@
 import { useState } from 'react'
-import type { Difficulty } from '../../server/paragraphs/service'
 import { getPracticeParagraph } from '../../server/paragraphs/service'
 import { PARAGRAPH_POOL } from '../../server/paragraphs/pool-data'
 import { getRunDurationMs } from '../../shared/timingEngine'
+import type { Difficulty } from '../lib/api'
+import { DIFFICULTIES, DIFFICULTY_LABELS } from '../lib/api'
 import { getBrowserLocalStorage } from '../lib/browserStorage'
 import { getPersonalBest, recordResult } from '../lib/personalBest'
 import { TypingEngine } from './TypingEngine'
-
-const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
-const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
 
 function pickParagraph(difficulty: Difficulty): string {
   return getPracticeParagraph(PARAGRAPH_POOL, new Date(), Math.random, difficulty).body

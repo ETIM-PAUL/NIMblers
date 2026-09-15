@@ -1,3 +1,5 @@
+import type { Difficulty } from '../db/types.ts'
+
 export interface RawEvent {
   key: string
   tRelativeMs: number
@@ -21,4 +23,8 @@ export function parseStakeBody(body: unknown): { nimAddress: string, stakeTxHash
   const v = body as Record<string, unknown>
   if (typeof v.nimAddress !== 'string' || typeof v.stakeTxHash !== 'string') return null
   return { nimAddress: v.nimAddress, stakeTxHash: v.stakeTxHash }
+}
+
+export function isDifficulty(value: unknown): value is Difficulty {
+  return value === 'easy' || value === 'medium' || value === 'hard'
 }

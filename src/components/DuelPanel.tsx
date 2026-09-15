@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import { errorMessage, fetchHouseAddress, readJsonOrThrow } from '../lib/api'
+import type { Difficulty, HouseAddressInfo } from '../lib/api'
+import { DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatLuna, readJsonOrThrow } from '../lib/api'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -9,75 +10,93 @@ interface Props {
 }
 
 type Stage =
-  | { name: 'idle' }
-  | { name: 'staking' }
-  | { name: 'revealing', stakeTxHash: string }
-  | { name: 'typing', stakeTxHash: string, paragraph: string }
-  | { name: 'submitting', stakeTxHash: string }
+  | { name: 'picking' }
+  | { name: 'staking', difficulty: Difficulty }
+  | { name: 'revealing', difficulty: Difficulty, stakeTxHash: string }
+  | { name: 'typing', difficulty: Difficulty, stakeTxHash: string, paragraph: string }
+  | { name: 'submitting', difficulty: Difficulty, stakeTxHash: string }
   | { name: 'waiting', entryId: string, expiresAt: string }
-  | { name: 'error', message: string, stakeTxHash: string | null }
+  | { name: 'error', message: string, difficulty: Difficulty, stakeTxHash: string | null }
 
 export function DuelPanel({ address, sendPayment }: Props) {
-  const [stage, setStage] = useState<Stage>({ name: 'idle' })
+  const [stage, setStage] = useState<Stage>({ name: 'picking' })
+  const [houseInfo, setHouseInfo] = useState<HouseAddressInfo | null>(null)
 
-  async function revealParagraph(stakeTxHash: string) {
-    setStage({ name: 'revealing', stakeTxHash })
+  useEffect(() => {
+    fetchHouseAddress().then(setHouseInfo).catch(() => {
+      // Stake amounts just won't show on the picker buttons yet — handleStake
+      // fetches this again anyway and surfaces any real error there.
+    })
+  }, [])
+
+  async function revealParagraph(difficulty: Difficulty, stakeTxHash: string) {
+    setStage({ name: 'revealing', difficulty, stakeTxHash })
     try {
       const res = await fetch('/api/entries/reveal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nimAddress: address, stakeTxHash }),
+        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty }),
       })
       const body = await readJsonOrThrow(res, 'Could not reveal the paragraph')
-      setStage({ name: 'typing', stakeTxHash, paragraph: body.paragraphBody as string })
+      setStage({ name: 'typing', difficulty, stakeTxHash, paragraph: body.paragraphBody as string })
     }
     catch (error) {
-      setStage({ name: 'error', message: errorMessage(error), stakeTxHash })
+      setStage({ name: 'error', message: errorMessage(error), difficulty, stakeTxHash })
     }
   }
 
-  async function handleStake() {
-    setStage({ name: 'staking' })
+  async function handleStake(difficulty: Difficulty) {
+    setStage({ name: 'staking', difficulty })
     try {
       const house = await fetchHouseAddress()
-      const stakeTxHash = await sendPayment(house.address, house.stakeLuna)
-      await revealParagraph(stakeTxHash)
+      const stakeTxHash = await sendPayment(house.address, house.stakes[difficulty])
+      await revealParagraph(difficulty, stakeTxHash)
     }
     catch (error) {
-      setStage({ name: 'error', message: errorMessage(error), stakeTxHash: null })
+      setStage({ name: 'error', message: errorMessage(error), difficulty, stakeTxHash: null })
     }
   }
 
-  async function handleSubmitRun(stakeTxHash: string, run: KeystrokeRun) {
-    setStage({ name: 'submitting', stakeTxHash })
+  async function handleSubmitRun(difficulty: Difficulty, stakeTxHash: string, run: KeystrokeRun) {
+    setStage({ name: 'submitting', difficulty, stakeTxHash })
     try {
       const res = await fetch('/api/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nimAddress: address, stakeTxHash, events: run.events }),
+        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events }),
       })
       const body = await readJsonOrThrow(res, 'Could not submit your run')
       setStage({ name: 'waiting', entryId: body.entryId as string, expiresAt: body.expiresAt as string })
     }
     catch (error) {
-      setStage({ name: 'error', message: errorMessage(error), stakeTxHash })
+      setStage({ name: 'error', message: errorMessage(error), difficulty, stakeTxHash })
     }
   }
 
-  if (stage.name === 'idle') {
+  if (stage.name === 'picking') {
     return (
       <div className="duel-panel">
         <p className="section-note">
-          Stake 1 NIM, type today's paragraph, and wait for someone to take the bet. Your time stays
-          hidden until they finish theirs.
+          Stake NIM, type today's paragraph for that level, and wait for someone to take the bet.
+          Your time stays hidden until they finish theirs.
         </p>
         <p className="duel-warning">
           Once you stake, closing this tab before you finish typing forfeits the stake — it is not
           automatically refunded. Only a fully OPEN entry that nobody challenges within 24h gets refunded.
         </p>
-        <button type="button" className="btn btn-primary" onClick={() => void handleStake()}>
-          Stake 1 NIM to start a duel
-        </button>
+        <div className="difficulty-picker">
+          {DIFFICULTIES.map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={`btn btn-difficulty btn-difficulty-${d}`}
+              onClick={() => void handleStake(d)}
+            >
+              {DIFFICULTY_LABELS[d]}
+              {houseInfo && <span className="btn-difficulty-stake">{formatLuna(houseInfo.stakes[d])}</span>}
+            </button>
+          ))}
+        </div>
       </div>
     )
   }
@@ -96,7 +115,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
         <p className="duel-warning">Closing this tab now forfeits your stake — finish typing to lock in your entry.</p>
         <TypingEngine
           paragraph={stage.paragraph}
-          onSubmit={(run) => void handleSubmitRun(stage.stakeTxHash, run)}
+          onSubmit={(run) => void handleSubmitRun(stage.difficulty, stage.stakeTxHash, run)}
         />
       </>
     )
@@ -118,14 +137,14 @@ export function DuelPanel({ address, sendPayment }: Props) {
     )
   }
 
-  const { stakeTxHash } = stage
+  const { difficulty, stakeTxHash } = stage
   return (
     <div className="duel-panel">
       <p className="address-card-error">{stage.message}</p>
       <button
         type="button"
         className="btn btn-primary"
-        onClick={() => void (stakeTxHash ? revealParagraph(stakeTxHash) : handleStake())}
+        onClick={() => void (stakeTxHash ? revealParagraph(difficulty, stakeTxHash) : handleStake(difficulty))}
       >
         Try again
       </button>

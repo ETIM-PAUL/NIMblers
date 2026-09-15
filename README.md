@@ -22,9 +22,11 @@ they want; Player B finds the open stake later and takes the bet. The duel is
 async by design — it fits inside the thirty seconds someone has between two
 other things.
 
-There's also a free practice mode with three difficulty tiers — Easy, Medium,
+There's also a free practice mode with the same three tiers — Easy, Medium,
 Hard — for warming up before you put NIM on the line, with your personal best
-per tier tracked locally so there's something to chase even solo.
+per tier tracked locally so there's something to chase even solo. Practicing
+never types today's live duel paragraph for any tier, so warming up can't
+leak the answer.
 
 ## Why Nimiq
 
@@ -35,22 +37,24 @@ all without leaving the app you already have open.
 
 ## How a duel works
 
-1. **Stake.** Player A commits NIM and starts typing. The paragraph is revealed
-   only after the stake is independently confirmed on-chain — never because a
-   client claims it happened. There's no "changed my mind" undo: closing the
-   tab before finishing forfeits the stake rather than refunding it, which is
-   what keeps stake-then-abandon from being a free way to grief the house
-   wallet. A fully submitted entry that nobody ever challenges *does* get
-   refunded automatically after 24 hours.
+1. **Pick a level, then stake.** Easy is 1 NIM, Medium is 3, Hard is 5 — each
+   tier has its own daily paragraph, so a harder duel is a harder paragraph,
+   not just a bigger number. The paragraph is revealed only after the stake
+   is independently confirmed on-chain, for that exact tier's amount — never
+   because a client claims it happened. There's no "changed my mind" undo:
+   closing the tab before finishing forfeits the stake rather than refunding
+   it, which is what keeps stake-then-abandon from being a free way to grief
+   the house wallet. A fully submitted entry that nobody ever challenges
+   *does* get refunded automatically after 24 hours.
 2. **Type blind.** The client streams every keystroke to the server as it
    happens. The server — never the browser — computes the final time. A's time
    stays hidden from everyone, including A, until the duel resolves.
-3. **Someone takes the bet.** Player B browses open stakes (opponent, amount,
-   age — never a time) and matches one. That locks the entry — the lock is
-   what stops two challengers racing for the same stake — and starts a
-   timer for B's own run. If B never finishes, the lock expires and the
-   entry reopens for someone else; A's stake is never at risk from a
-   challenger who wanders off.
+3. **Someone takes the bet.** Player B browses open stakes (opponent, level,
+   amount, age — never a time) and matches one at that exact stake. That
+   locks the entry — the lock is what stops two challengers racing for the
+   same stake — and starts a timer for B's own run. If B never finishes, the
+   lock expires and the entry reopens for someone else; A's stake is never
+   at risk from a challenger who wanders off.
 4. **Winner takes the pot.** The server compares both independently-verified
    times, takes a small rake, and pays the winner on-chain. Ties refund both
    sides in full.

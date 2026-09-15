@@ -11,7 +11,8 @@
     "db:migrate": "node --experimental-strip-types server/db/migrate.ts up",
     "db:migrate:down": "node --experimental-strip-types server/db/migrate.ts down",
     "db:migrate:status": "node --experimental-strip-types server/db/migrate.ts status",
-    "db:seed": "node --experimental-strip-types server/db/seed.ts"
+    "db:seed": "node --experimental-strip-types server/db/seed.ts",
+    "test": "node --experimental-strip-types --test server/**/*.test.ts"
   },
   "dependencies": {
     "@nimiq/mini-app-sdk": "^0.1.0",

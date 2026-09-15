@@ -1,11 +1,23 @@
+import type { DatabaseSync } from 'node:sqlite'
 import { closeDb, getDb } from './client.ts'
 import { migrateUp } from './migrate.ts'
+import { PARAGRAPH_POOL } from '../paragraphs/pool-data.ts'
 
 // Fixed ids so re-running the seed is a no-op rather than a duplicate insert.
 const SEED_USER_ID = 'seed-user-a'
-const SEED_PARAGRAPH_ID = 'seed-paragraph-1'
+const SEED_PARAGRAPH_ID = PARAGRAPH_POOL[0].id
 const SEED_RUN_ID = 'seed-run-a'
 const SEED_ENTRY_ID = 'seed-entry-1'
+
+export function seedParagraphPool(db: DatabaseSync): void {
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
+  )
+  const nowIso = new Date().toISOString()
+  for (const paragraph of PARAGRAPH_POOL) {
+    insert.run(paragraph.id, paragraph.body, paragraph.difficulty, nowIso)
+  }
+}
 
 export function seed(): void {
   migrateUp()
@@ -20,9 +32,7 @@ export function seed(): void {
     nowIso,
   )
 
-  db.prepare(
-    'INSERT OR IGNORE INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
-  ).run(SEED_PARAGRAPH_ID, 'The quick brown fox jumps over the lazy dog.', 'easy', nowIso)
+  seedParagraphPool(db)
 
   db.prepare(
     `INSERT OR IGNORE INTO keystroke_runs

@@ -21,8 +21,15 @@ the build plan — an explicit enum, not booleans. See
 `server/db/migrations/0001_init/up.sql` for the full schema and
 `server/db/types.ts` for the matching TS row types.
 
+**Phase 3 — Paragraph service.** `server/paragraphs/` picks the daily paragraph
+deterministically from a 30-paragraph pool (`pool-data.ts`, tagged easy/medium/hard)
+by hashing the UTC calendar date, and `getPracticeParagraph()` always excludes
+whatever is live as today's daily paragraph. `service.ts` is pure (pool in,
+paragraph out) so it's tested directly — `npm test` checks 365 simulated days —
+while `repository.ts` is the thin layer that fetches the pool from SQLite.
+
 No typing engine, staking, or escrow yet — that's later phases. The server itself
-(an API that writes to this schema) doesn't exist yet either — only the data layer.
+(an API, as opposed to these service modules) doesn't exist yet either.
 
 ## Development
 
@@ -50,6 +57,14 @@ npm run db:seed            # seed a fake OPEN entry for local testing
 
 Migrations live in `server/db/migrations/<name>/{up,down}.sql`. Add a new
 numbered directory per schema change; never edit an already-applied migration.
+
+## Tests
+
+```bash
+npm test
+```
+
+Node's built-in test runner (`node --test`), no extra framework dependency.
 
 ## Custodial escrow
 

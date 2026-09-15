@@ -23,7 +23,8 @@ async by design — it fits inside the thirty seconds someone has between two
 other things.
 
 There's also a free practice mode with three difficulty tiers — Easy, Medium,
-Hard — for warming up before you put NIM on the line.
+Hard — for warming up before you put NIM on the line, with your personal best
+per tier tracked locally so there's something to chase even solo.
 
 ## Why Nimiq
 

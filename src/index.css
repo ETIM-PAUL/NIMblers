@@ -208,6 +208,12 @@ button {
 
 /* Difficulty picker */
 
+.difficulty-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .difficulty-picker {
   display: flex;
   gap: 8px;
@@ -237,6 +243,11 @@ button {
 
 .practice-actions .btn {
   flex: 1;
+}
+
+.section-note-best {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* Sections */

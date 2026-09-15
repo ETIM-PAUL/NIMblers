@@ -16,7 +16,7 @@ function stakeIdempotencyKey(stakeTxHash: string): string {
   return `stake-${stakeTxHash}`
 }
 
-async function confirmStake(
+export async function confirmStake(
   db: DatabaseSync,
   wallet: HouseWallet,
   userId: string,

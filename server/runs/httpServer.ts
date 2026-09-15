@@ -2,24 +2,8 @@ import type { Server } from 'node:http'
 import { getDb } from '../db/client.ts'
 import { readJsonBody, sendJson, createRouter } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
+import { parseEvents } from '../http/validation.ts'
 import { submitRun } from './service.ts'
-
-interface RawEvent {
-  key: string
-  tRelativeMs: number
-  resultingLength: number
-}
-
-function isRawEvent(value: unknown): value is RawEvent {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
-  return typeof v.key === 'string' && typeof v.tRelativeMs === 'number' && typeof v.resultingLength === 'number'
-}
-
-function parseEvents(value: unknown): RawEvent[] | null {
-  if (!Array.isArray(value)) return null
-  return value.every(isRawEvent) ? value : null
-}
 
 /** Registers POST /api/runs — a standalone endpoint for validating a run without creating a duel entry. */
 export function registerRunRoutes(router: Router): void {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
+import { errorMessage, fetchHouseAddress, readJsonOrThrow } from '../lib/api'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -15,19 +16,6 @@ type Stage =
   | { name: 'submitting', stakeTxHash: string }
   | { name: 'waiting', entryId: string, expiresAt: string }
   | { name: 'error', message: string, stakeTxHash: string | null }
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-async function readJsonOrThrow(res: Response, fallback: string): Promise<Record<string, unknown>> {
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-  if (!res.ok) {
-    const reason = typeof body.error === 'string' ? body.error : fallback
-    throw new Error(reason)
-  }
-  return body
-}
 
 export function DuelPanel({ address, sendPayment }: Props) {
   const [stage, setStage] = useState<Stage>({ name: 'idle' })
@@ -51,9 +39,8 @@ export function DuelPanel({ address, sendPayment }: Props) {
   async function handleStake() {
     setStage({ name: 'staking' })
     try {
-      const houseRes = await fetch('/api/house-address')
-      const house = await readJsonOrThrow(houseRes, 'Could not reach the house wallet')
-      const stakeTxHash = await sendPayment(house.address as string, house.stakeLuna as number)
+      const house = await fetchHouseAddress()
+      const stakeTxHash = await sendPayment(house.address, house.stakeLuna)
       await revealParagraph(stakeTxHash)
     }
     catch (error) {

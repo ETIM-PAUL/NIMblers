@@ -23,7 +23,8 @@ export function createRouter(): Router {
   const routes = new Map<string, RouteHandler>()
 
   const server = createServer((req, res) => {
-    const handler = routes.get(`${req.method} ${req.url}`)
+    const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+    const handler = routes.get(`${req.method} ${pathname}`)
     if (!handler) {
       sendJson(res, 404, { error: 'not found' })
       return
@@ -36,6 +37,10 @@ export function createRouter(): Router {
     get: (path, handler) => routes.set(`GET ${path}`, handler),
     server,
   }
+}
+
+export function getQueryParams(req: IncomingMessage): URLSearchParams {
+  return new URL(req.url ?? '/', 'http://localhost').searchParams
 }
 
 export async function readJsonBody(req: IncomingMessage): Promise<unknown> {

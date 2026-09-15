@@ -25,7 +25,7 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-med-02',
     difficulty: 'medium',
-    body: 'Typing quickly is a skill built through repetition — the fingers learn patterns long before the mind notices.',
+    body: 'Typing quickly is a skill built through repetition: the fingers learn patterns long before the mind notices.',
   },
   {
     id: 'p-med-03',
@@ -55,7 +55,7 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-med-08',
     difficulty: 'medium',
-    body: 'Good server code assumes nothing from the client — every claim gets re-checked before it is ever trusted.',
+    body: 'Good server code assumes nothing from the client: every claim gets re-checked before it is ever trusted.',
   },
   {
     id: 'p-med-09',
@@ -72,12 +72,12 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-hard-01',
     difficulty: 'hard',
-    body: 'Consensus, in a decentralized network, isn\'t agreement in the human sense — it\'s the emergent result of thousands of independent nodes each verifying the same rules, over and over, without ever needing to trust one another.',
+    body: 'Consensus, in a decentralized network, isn\'t agreement in the human sense: it\'s the emergent result of thousands of independent nodes each verifying the same rules, over and over, without ever needing to trust one another.',
   },
   {
     id: 'p-hard-02',
     difficulty: 'hard',
-    body: 'By 11:47 PM, the storm — which the forecasters had, only six hours earlier, rated a 20% chance of arriving at all — had knocked out power to roughly 14,000 homes across three neighboring counties.',
+    body: 'By 11:47 PM, the storm (which the forecasters had, only six hours earlier, rated a 20% chance of arriving at all) had knocked out power to roughly 14,000 homes across three neighboring counties.',
   },
   {
     id: 'p-hard-03',
@@ -87,7 +87,7 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-hard-04',
     difficulty: 'hard',
-    body: 'Her thesis argued — convincingly, if a little combatively — that custodial escrow isn\'t a compromise forced on Nimiq by its lack of general smart contracts, but a deliberate, auditable trade-off any honest payments app eventually has to make.',
+    body: 'Her thesis argued (convincingly, if a little combatively) that custodial escrow isn\'t a compromise forced on Nimiq by its lack of general smart contracts, but a deliberate, auditable trade-off any honest payments app eventually has to make.',
   },
   {
     id: 'p-hard-05',
@@ -97,7 +97,7 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-hard-06',
     difficulty: 'hard',
-    body: 'An idempotency key doesn\'t prevent a retry from happening; it prevents a retry from mattering — the second call to payout() with the same key returns the first result instead of moving money twice.',
+    body: 'An idempotency key doesn\'t prevent a retry from happening; it prevents a retry from mattering: the second call to payout() with the same key returns the first result instead of moving money twice.',
   },
   {
     id: 'p-hard-07',
@@ -107,7 +107,7 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-hard-08',
     difficulty: 'hard',
-    body: 'What separates a fast typist from a bot isn\'t top speed — a script can hit 300 WPM trivially — it\'s the jitter: the tiny, human, unrepeatable variance between one "e" and the next "e", forty milliseconds later.',
+    body: 'What separates a fast typist from a bot isn\'t top speed (a script can hit 300 WPM trivially); it\'s the jitter: the tiny, human, unrepeatable variance between one "e" and the next "e", forty milliseconds later.',
   },
   {
     id: 'p-hard-09',
@@ -117,6 +117,6 @@ export const PARAGRAPH_POOL: Paragraph[] = [
   {
     id: 'p-hard-10',
     difficulty: 'hard',
-    body: 'Every state machine has an implicit question baked into its transitions — not "what happens next" but "what happens if this exact event fires twice" — and it\'s the second question that determines whether the system is actually safe.',
+    body: 'Every state machine has an implicit question baked into its transitions (not "what happens next" but "what happens if this exact event fires twice") and it\'s the second question that determines whether the system is actually safe.',
   },
 ]

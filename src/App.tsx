@@ -1,4 +1,5 @@
 import { AddressCard } from './components/AddressCard'
+import { ChallengeBrowser } from './components/ChallengeBrowser'
 import { ConnectionBanner } from './components/ConnectionBanner'
 import { DuelPanel } from './components/DuelPanel'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
@@ -56,6 +57,13 @@ function App() {
           {address
             ? <DuelPanel address={address} sendPayment={sendPayment} />
             : <p className="section-note">Show your address above to stake and start a duel.</p>}
+        </section>
+
+        <section className="section">
+          <h2 className="section-title">Open duels</h2>
+          {address
+            ? <ChallengeBrowser address={address} sendPayment={sendPayment} />
+            : <p className="section-note">Show your address above to browse and take a bet.</p>}
         </section>
 
         <section className="section">

@@ -92,12 +92,18 @@ so there's nothing to fake.
   keystroke stream is what the server uses to independently re-verify it — one
   implementation in `shared/`, imported by both sides, so there's no separate
   "server's opinion of how typing works" to drift out of sync
-- **Duel lifecycle:** a pure state machine (`server/duels/`) with four
-  states — `OPEN → LOCKED → SETTLED`, or `→ EXPIRED` — and no I/O at all, so
-  it's property-tested directly: thousands of randomized event sequences,
-  checked after every single step, confirm a duel can never settle twice,
-  never owe more than the two stakes actually in its pot, and never end up
-  in a terminal state with no one entitled to the money
+- **Duel lifecycle:** a pure state machine (`server/duels/stateMachine.ts`)
+  with four states — `OPEN → LOCKED → SETTLED`, or `→ EXPIRED` — and no I/O
+  at all, so it's property-tested directly: thousands of randomized event
+  sequences, checked after every single step, confirm a duel can never
+  settle twice, never owe more than the two stakes actually in its pot, and
+  never end up in a terminal state with no one entitled to the money
+- **No double-challenge race:** when two people try to challenge the same
+  entry at once, the lock is a single conditional SQL `UPDATE ... WHERE
+  status = 'OPEN'` with nothing async before it — SQLite is single-threaded,
+  so the two requests literally cannot both see the entry as open. One
+  locks it and gets the paragraph; the other gets a clean rejection,
+  verified with real concurrent HTTP requests, not just sequential calls
 - **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
   only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
   creation — so a duel's stake can't sit in a trustless on-chain contract
@@ -140,7 +146,7 @@ server/
   db/               Schema, migrations, seed data
   paragraphs/       Deterministic daily paragraph + practice-pool logic
   runs/             POST /api/runs — server-side keystroke replay and validation
-  duels/            Pure OPEN/LOCKED/SETTLED/EXPIRED state machine, property-tested
+  duels/            Pure state machine, plus Player B's flow — browse, challenge, submit
   entries/          Player A's flow — stake, reveal, submit, create the OPEN entry
 services/
   escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance

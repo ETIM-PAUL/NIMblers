@@ -66,7 +66,7 @@ async function handleSubmitRun(req: IncomingMessage, res: ServerResponse): Promi
     return
   }
 
-  sendJson(res, 201, { runId: result.runId, durationMs: result.durationMs })
+  sendJson(res, 201, { runId: result.runId, durationMs: result.durationMs, flags: result.flags })
 }
 
 /**

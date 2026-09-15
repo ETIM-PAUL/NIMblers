@@ -59,11 +59,17 @@ so there's nothing to fake.
   that completes the paragraph — never on the Submit click. You can stare at
   a finished duel for ten minutes before hitting Submit and the recorded time
   won't move.
-- Statistical checks flag inhuman typing patterns: impossible WPM, robotically
-  uniform intervals, missing the natural speed-up/slow-down on common letter
-  pairs (`th` is fast, `qp` is slow — bots don't know that).
-- Flagged runs go to review instead of auto-voiding. False positives get
-  refunded; nobody gets silently robbed by a bad heuristic.
+- A hard WPM ceiling rejects outright — nobody legitimately types at 2000+
+  WPM. Below that, statistical checks watch for the tells of scripted input:
+  keystrokes on a suspiciously fixed timer, "randomness" that's actually
+  flat uniform noise instead of the peaked shape real typing rhythm has, and
+  missing the natural speed-up/slow-down on common letter pairs (`th` is
+  fast, `qp` is slow — a bot that ignores content doesn't know that).
+- Those statistical checks flag runs for review instead of auto-voiding them
+  — they're still accepted and scored. False positives get refunded; nobody
+  gets silently robbed by a heuristic that guessed wrong.
+- Submissions are rate-limited per address per day, independent of any of
+  the above.
 
 ## Under the hood
 

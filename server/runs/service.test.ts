@@ -14,7 +14,7 @@ function honestEvents(): { key: string, tRelativeMs: number, resultingLength: nu
   let typed = ''
   return TARGET.split('').map((char, i) => {
     typed += char
-    return { key: char, tRelativeMs: i * 40, resultingLength: typed.length }
+    return { key: char, tRelativeMs: i * 100, resultingLength: typed.length }
   })
 }
 
@@ -61,7 +61,7 @@ test('a tampered payload (edited timestamps) is rejected and nothing is persiste
 })
 
 test('a forged final string is rejected and nothing is persisted', () => {
-  const events = TARGET.split('').map((_, i) => ({ key: 'z', tRelativeMs: i * 40, resultingLength: i + 1 }))
+  const events = TARGET.split('').map((_, i) => ({ key: 'z', tRelativeMs: i * 100, resultingLength: i + 1 }))
 
   const result = submitRun(db, { nimAddress: 'NQtest1', paragraphId: PARAGRAPH_ID, events })
   assert.equal(result.ok, false)
@@ -84,4 +84,46 @@ test('submitting twice from the same address reuses one user row', () => {
 
   const runCount = db.prepare('SELECT COUNT(*) c FROM keystroke_runs').get() as { c: number }
   assert.equal(runCount.c, 2)
+})
+
+test('a run far above the WPM ceiling is rejected and nothing is persisted', () => {
+  const events = TARGET.split('').map((char, i) => ({ key: char, tRelativeMs: i * 5, resultingLength: i + 1 }))
+  const result = submitRun(db, { nimAddress: 'NQtest1', paragraphId: PARAGRAPH_ID, events })
+  assert.equal(result.ok, false)
+  if (result.ok) return
+  assert.match(result.reason, /WPM ceiling/)
+
+  const count = db.prepare('SELECT COUNT(*) c FROM keystroke_runs').get() as { c: number }
+  assert.equal(count.c, 0)
+})
+
+test('a flagged-but-authentic run is still persisted, with its flags recorded', () => {
+  // A perfectly constant delay between every keystroke — authentic replay,
+  // but statistically bot-like.
+  const events = TARGET.split('').map((char, i) => ({ key: char, tRelativeMs: i * 90, resultingLength: i + 1 }))
+  const result = submitRun(db, { nimAddress: 'NQtest1', paragraphId: PARAGRAPH_ID, events })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.ok(result.flags.length > 0)
+
+  const row = db.prepare('SELECT flags FROM keystroke_runs WHERE id = ?').get(result.runId) as { flags: string | null }
+  assert.ok(row.flags)
+  assert.deepEqual(JSON.parse(row.flags as string), result.flags)
+})
+
+test('exceeding the daily run limit for an address is rejected', () => {
+  submitRun(db, { nimAddress: 'NQlimited', paragraphId: PARAGRAPH_ID, events: honestEvents() }, { dailyRunLimit: 1 })
+  const second = submitRun(
+    db,
+    { nimAddress: 'NQlimited', paragraphId: PARAGRAPH_ID, events: honestEvents() },
+    { dailyRunLimit: 1 },
+  )
+
+  assert.equal(second.ok, false)
+  if (second.ok) return
+  assert.match(second.reason, /daily run limit/)
+
+  const runCount = db.prepare('SELECT COUNT(*) c FROM keystroke_runs').get() as { c: number }
+  assert.equal(runCount.c, 1)
 })

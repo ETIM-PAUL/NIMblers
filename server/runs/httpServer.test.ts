@@ -35,7 +35,7 @@ after(async () => {
 test('POST /api/runs accepts a valid run over real HTTP and returns the server-computed duration', async () => {
   const events = [
     { key: 'h', tRelativeMs: 0, resultingLength: 1 },
-    { key: 'i', tRelativeMs: 90, resultingLength: 2 },
+    { key: 'i', tRelativeMs: 200, resultingLength: 2 },
   ]
   const res = await fetch(`${baseUrl}/api/runs`, {
     method: 'POST',
@@ -43,9 +43,10 @@ test('POST /api/runs accepts a valid run over real HTTP and returns the server-c
     body: JSON.stringify({ nimAddress: 'NQhttp', paragraphId: PARAGRAPH_ID, events }),
   })
   assert.equal(res.status, 201)
-  const body = (await res.json()) as { durationMs: number, runId: string }
-  assert.equal(body.durationMs, 90)
+  const body = (await res.json()) as { durationMs: number, runId: string, flags: string[] }
+  assert.equal(body.durationMs, 200)
   assert.equal(typeof body.runId, 'string')
+  assert.ok(Array.isArray(body.flags))
 })
 
 test('POST /api/runs rejects a tampered payload (edited timestamps) over real HTTP', async () => {

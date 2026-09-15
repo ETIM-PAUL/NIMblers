@@ -23,6 +23,8 @@ export interface KeystrokeRunRow {
   paragraph_id: string
   events: string
   duration_ms: number | null
+  /** JSON-encoded array of integrity flags (see server/runs/integrity.ts), or null if clean. */
+  flags: string | null
   created_at: string
 }
 

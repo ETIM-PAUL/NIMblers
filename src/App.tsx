@@ -1,14 +1,8 @@
-import { useState } from 'react'
 import { AddressCard } from './components/AddressCard'
 import { ConnectionBanner } from './components/ConnectionBanner'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
-import { TypingEngine } from './components/TypingEngine'
-import { getRunDurationMs } from './lib/timingEngine'
+import { PracticePanel } from './components/PracticePanel'
 import { useNimiq } from './lib/useNimiq'
-
-// Temporary demo text — a later phase replaces this with a real paragraph
-// fetched through the paragraph service.
-const DEMO_PARAGRAPH = 'The quick brown fox jumps over the lazy dog.'
 
 function App() {
   const {
@@ -21,7 +15,6 @@ function App() {
     addressError,
     connectWallet,
   } = useNimiq()
-  const [durationMs, setDurationMs] = useState<number | null>(null)
 
   if (isConnecting) {
     return (
@@ -58,21 +51,7 @@ function App() {
 
         <section className="section">
           <h2 className="section-title">Practice</h2>
-          {durationMs !== null
-            ? (
-                <>
-                  <p className="section-note">Matched in {Math.round(durationMs)}ms. (Nothing is saved yet.)</p>
-                  <button type="button" className="btn btn-primary" onClick={() => setDurationMs(null)}>
-                    Play again
-                  </button>
-                </>
-              )
-            : (
-                <TypingEngine
-                  paragraph={DEMO_PARAGRAPH}
-                  onSubmit={(run) => setDurationMs(getRunDurationMs(run))}
-                />
-              )}
+          <PracticePanel />
         </section>
       </main>
     </div>

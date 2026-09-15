@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import type { ParagraphRow } from '../db/types.ts'
+import type { Difficulty, ParagraphRow } from '../db/types.ts'
 import type { Paragraph } from './service.ts'
 import { getDailyParagraph, getPracticeParagraph } from './service.ts'
 
@@ -15,6 +15,10 @@ export function getDailyParagraphForToday(db: DatabaseSync, date: Date = new Dat
   return getDailyParagraph(listParagraphs(db), date)
 }
 
-export function getPracticeParagraphForToday(db: DatabaseSync, date: Date = new Date()): Paragraph {
-  return getPracticeParagraph(listParagraphs(db), date)
+export function getPracticeParagraphForToday(
+  db: DatabaseSync,
+  date: Date = new Date(),
+  difficulty?: Difficulty,
+): Paragraph {
+  return getPracticeParagraph(listParagraphs(db), date, Math.random, difficulty)
 }

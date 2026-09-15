@@ -47,3 +47,26 @@ test('getPracticeParagraph throws with a single-paragraph pool', () => {
   const singleton = [PARAGRAPH_POOL[0]]
   assert.throws(() => getPracticeParagraph(singleton, new Date('2026-01-01T00:00:00.000Z')))
 })
+
+test('getPracticeParagraph with a difficulty only returns paragraphs of that tier', () => {
+  for (const date of simulatedDays(30)) {
+    for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+      const practice = getPracticeParagraph(PARAGRAPH_POOL, date, Math.random, difficulty)
+      assert.equal(practice.difficulty, difficulty)
+    }
+  }
+})
+
+test('getPracticeParagraph with a difficulty still excludes today\'s daily paragraph', () => {
+  for (const date of simulatedDays(365)) {
+    const daily = getDailyParagraph(PARAGRAPH_POOL, date)
+    const candidateCount = PARAGRAPH_POOL.filter(
+      (p) => p.difficulty === daily.difficulty && p.id !== daily.id,
+    ).length
+    for (let i = 0; i < candidateCount; i++) {
+      const rng = () => i / candidateCount
+      const practice = getPracticeParagraph(PARAGRAPH_POOL, date, rng, daily.difficulty)
+      assert.notEqual(practice.id, daily.id)
+    }
+  }
+})

@@ -201,6 +201,44 @@ button {
   color: #fff;
 }
 
+.btn-secondary {
+  background: var(--neutral-bg);
+  color: var(--text);
+}
+
+/* Difficulty picker */
+
+.difficulty-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-difficulty {
+  flex: 1;
+  color: #fff;
+}
+
+.btn-difficulty-easy {
+  background: var(--accent);
+}
+
+.btn-difficulty-medium {
+  background: #c9862e;
+}
+
+.btn-difficulty-hard {
+  background: var(--danger);
+}
+
+.practice-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.practice-actions .btn {
+  flex: 1;
+}
+
 /* Sections */
 
 .section {

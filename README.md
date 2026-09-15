@@ -22,6 +22,9 @@ they want; Player B finds the open stake later and takes the bet. The duel is
 async by design — it fits inside the thirty seconds someone has between two
 other things.
 
+There's also a free practice mode with three difficulty tiers — Easy, Medium,
+Hard — for warming up before you put NIM on the line.
+
 ## Why Nimiq
 
 Nimiq settles in seconds and its Mini Apps run *inside* the wallet — no install,

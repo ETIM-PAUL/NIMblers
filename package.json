@@ -14,6 +14,7 @@
     "db:seed": "node --experimental-strip-types server/db/seed.ts",
     "server": "node --experimental-strip-types server/index.ts",
     "escrow:demo": "node --env-file-if-exists=.env --experimental-strip-types scripts/escrow-testnet-demo.ts",
+    "expiry:sweep": "node --env-file-if-exists=.env --experimental-strip-types scripts/expiry-sweep.ts",
     "test": "node --experimental-strip-types --test server/**/*.test.ts services/**/*.test.ts shared/**/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {

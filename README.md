@@ -45,7 +45,10 @@ all without leaving the app you already have open.
    closing the tab before finishing forfeits the stake rather than refunding
    it, which is what keeps stake-then-abandon from being a free way to grief
    the house wallet. A fully submitted entry that nobody ever challenges
-   *does* get refunded automatically after 24 hours.
+   *does* get refunded automatically after 24 hours, and a challenger who
+   locks an entry and then vanishes loses their claim on it the same way —
+   the lock releases so someone else can take the bet, but their own stake
+   isn't returned either, for the same anti-griefing reason.
 2. **Type blind.** The client streams every keystroke to the server as it
    happens. The server — never the browser — computes the final time. A's time
    stays hidden from everyone, including A, until the duel resolves.
@@ -132,6 +135,19 @@ so there's nothing to fake.
   duel, a retry re-derives the same reveal instead of moving money twice —
   verified by driving the actual settlement twice in a row and asserting
   only one payout row exists.
+- **Expiry sweep:** a scheduled job (`npm run expiry:sweep`, meant to run on
+  a timer — nothing in this repo schedules it itself) refunds entries
+  nobody ever challenged within 24 hours and releases challenger locks
+  whose TTL lapsed with no submitted run. It decides both using the exact
+  same pure state-machine transitions the rest of the duel lifecycle is
+  property-tested against, so there's one definition of "expired" the
+  whole codebase agrees on. Each row is claimed with the same atomic
+  conditional `UPDATE ... WHERE status = '...'` the challenge lock already
+  relies on, so the sweep is safe to run twice, overlap with itself, or
+  retry after a crash — an entry created 25 hours ago and swept three times
+  in a row is refunded exactly once. A refund that fails mid-flight reverts
+  its claim back to OPEN instead of stranding the stake in a status no
+  future sweep would ever look at again.
 
 ## Try it
 
@@ -163,12 +179,13 @@ server/
   db/               Schema, migrations, seed data
   paragraphs/       Deterministic daily paragraph + practice-pool logic
   runs/             POST /api/runs — server-side keystroke replay and validation
-  duels/            Pure state machine, plus Player B's flow — browse, challenge, submit
+  duels/            Pure state machine, Player B's flow (browse, challenge, submit,
+                    settle), and the expiry/refund sweep
   entries/          Player A's flow — stake, reveal, submit, create the OPEN entry
 services/
   escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance
   nimiqWallet.ts    House wallet client (real @nimiq/core testnet light client)
-scripts/            One-off scripts, e.g. a live testnet escrow demo
+scripts/            One-off/scheduled scripts — a live testnet escrow demo, the expiry sweep
 ```
 
 ## House wallet setup (testnet)
@@ -197,6 +214,18 @@ runners) can prevent that entirely; if the script times out waiting for
 consensus, try it from a normal dev machine's network instead. The
 idempotency guarantee itself doesn't depend on any of that — it's covered
 by `services/escrow.test.ts` against a fake wallet, no network required.
+
+```bash
+npm run expiry:sweep
+```
+
+runs the expiry/refund sweep once against the real house wallet — refunding
+entries nobody challenged in time and releasing stale challenger locks.
+Nothing in this repo schedules it; point a cron job (or your platform's
+scheduled-function equivalent) at this command, on whatever interval you're
+comfortable with — it's idempotent, so an overlapping or repeated run is
+safe. Its logic is covered by `server/duels/expiryJob.test.ts` against a
+fake wallet, no network required, for the same reason as above.
 
 ## Everything currently testnet-only
 

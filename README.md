@@ -36,7 +36,12 @@ all without leaving the app you already have open.
 ## How a duel works
 
 1. **Stake.** Player A commits NIM and starts typing. The paragraph is revealed
-   only after the stake is locked in.
+   only after the stake is independently confirmed on-chain — never because a
+   client claims it happened. There's no "changed my mind" undo: closing the
+   tab before finishing forfeits the stake rather than refunding it, which is
+   what keeps stake-then-abandon from being a free way to grief the house
+   wallet. A fully submitted entry that nobody ever challenges *does* get
+   refunded automatically after 24 hours.
 2. **Type blind.** The client streams every keystroke to the server as it
    happens. The server — never the browser — computes the final time. A's time
    stays hidden from everyone, including A, until the duel resolves.
@@ -109,20 +114,21 @@ so there's nothing to fake.
 
 ```bash
 npm install
-npm run dev -- --host
+npm run db:migrate
+npm run db:seed
+npm run server        # API on :8787
+npm run dev -- --host  # frontend on :5173, proxying /api to :8787
 ```
 
 Vite prints a **Network URL** (not `localhost`) — open that inside Nimiq Pay
 (Mini Apps → paste the URL). Your dev machine and phone need to be on the same
 Wi-Fi network. Opened in a regular browser instead, the app shows a clear
-"open me inside Nimiq Pay" screen rather than crashing.
+"open me inside Nimiq Pay" screen rather than crashing. Staking requires the
+API server to also have a funded house wallet — see below.
 
 ```bash
-npm run db:migrate   # set up the local schema
-npm run db:seed      # seed the paragraph pool + a sample open entry
-npm run server        # start the API on :8787
-npm test               # run the test suite
-npm run build           # typecheck everything + production build
+npm test    # run the test suite
+npm run build  # typecheck everything + production build
 ```
 
 ## Project layout
@@ -135,6 +141,7 @@ server/
   paragraphs/       Deterministic daily paragraph + practice-pool logic
   runs/             POST /api/runs — server-side keystroke replay and validation
   duels/            Pure OPEN/LOCKED/SETTLED/EXPIRED state machine, property-tested
+  entries/          Player A's flow — stake, reveal, submit, create the OPEN entry
 services/
   escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance
   nimiqWallet.ts    House wallet client (real @nimiq/core testnet light client)

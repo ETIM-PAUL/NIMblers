@@ -12,6 +12,8 @@ interface NimiqConnection {
   isLoadingAddress: boolean
   addressError: string | null
   connectWallet: () => Promise<void>
+  /** Sends a basic NIM payment (in Luna) through the user's own wallet, returning the tx hash. Requires a native confirmation dialog; throws on rejection or error. */
+  sendPayment: (recipient: string, valueLuna: number) => Promise<string>
 }
 
 // Initializes the Nimiq provider once and reports connection state.
@@ -78,6 +80,14 @@ export function useNimiq(): NimiqConnection {
     }
   }, [])
 
+  const sendPayment = useCallback(async (recipient: string, valueLuna: number): Promise<string> => {
+    const client = clientRef.current
+    if (!client) throw new Error('Nimiq provider is not ready')
+    const result = await client.sendBasicTransaction({ recipient, value: valueLuna })
+    if (typeof result === 'string') return result
+    throw new Error(result.error.message)
+  }, [])
+
   return {
     isConnecting,
     isReady,
@@ -87,5 +97,6 @@ export function useNimiq(): NimiqConnection {
     isLoadingAddress,
     addressError,
     connectWallet,
+    sendPayment,
   }
 }

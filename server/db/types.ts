@@ -37,6 +37,8 @@ export interface EntryRow {
   status: EntryStatus
   created_at: string
   expires_at: string
+  /** The on-chain stake transaction that funded this entry. UNIQUE — one stake can only ever back one entry. */
+  stake_tx_hash: string | null
 }
 
 export interface DuelRow {

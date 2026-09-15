@@ -1,5 +1,6 @@
 import { AddressCard } from './components/AddressCard'
 import { ConnectionBanner } from './components/ConnectionBanner'
+import { DuelPanel } from './components/DuelPanel'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
 import { PracticePanel } from './components/PracticePanel'
 import { useNimiq } from './lib/useNimiq'
@@ -14,6 +15,7 @@ function App() {
     isLoadingAddress,
     addressError,
     connectWallet,
+    sendPayment,
   } = useNimiq()
 
   if (isConnecting) {
@@ -48,6 +50,13 @@ function App() {
           error={addressError}
           onConnect={connectWallet}
         />
+
+        <section className="section">
+          <h2 className="section-title">Duel</h2>
+          {address
+            ? <DuelPanel address={address} sendPayment={sendPayment} />
+            : <p className="section-note">Show your address above to stake and start a duel.</p>}
+        </section>
 
         <section className="section">
           <h2 className="section-title">Practice</h2>

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { KeystrokeEvent } from '../../shared/timingEngine.ts'
+import { getOrCreateUser } from '../db/users.ts'
 import { validateRun } from './validateRun.ts'
 import { checkIntegrity, DEFAULT_WPM_CEILING } from './integrity.ts'
 import type { IntegrityFlag } from './integrity.ts'
@@ -22,21 +23,6 @@ export type SubmitRunResult =
 
 /** Starting point — "tune later" applies here too. */
 export const DEFAULT_DAILY_RUN_LIMIT = 50
-
-function getOrCreateUser(db: DatabaseSync, nimAddress: string): string {
-  const existing = db.prepare('SELECT id FROM users WHERE nim_address = ?').get(nimAddress) as
-    | { id: string }
-    | undefined
-  if (existing) return existing.id
-
-  const id = randomUUID()
-  db.prepare('INSERT INTO users (id, nim_address, created_at) VALUES (?, ?, ?)').run(
-    id,
-    nimAddress,
-    new Date().toISOString(),
-  )
-  return id
-}
 
 function countRunsToday(db: DatabaseSync, userId: string): number {
   const startOfDay = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`

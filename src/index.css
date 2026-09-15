@@ -250,6 +250,23 @@ button {
   font-weight: 600;
 }
 
+/* Duel panel */
+
+.duel-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.duel-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  font-size: 13px;
+}
+
 /* Sections */
 
 .section {

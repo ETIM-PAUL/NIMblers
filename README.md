@@ -41,8 +41,11 @@ all without leaving the app you already have open.
    happens. The server — never the browser — computes the final time. A's time
    stays hidden from everyone, including A, until the duel resolves.
 3. **Someone takes the bet.** Player B browses open stakes (opponent, amount,
-   age — never a time) and matches one. That locks the entry and starts B's
-   own run against the same paragraph.
+   age — never a time) and matches one. That locks the entry — the lock is
+   what stops two challengers racing for the same stake — and starts a
+   timer for B's own run. If B never finishes, the lock expires and the
+   entry reopens for someone else; A's stake is never at risk from a
+   challenger who wanders off.
 4. **Winner takes the pot.** The server compares both independently-verified
    times, takes a small rake, and pays the winner on-chain. Ties refund both
    sides in full.
@@ -84,6 +87,12 @@ so there's nothing to fake.
   keystroke stream is what the server uses to independently re-verify it — one
   implementation in `shared/`, imported by both sides, so there's no separate
   "server's opinion of how typing works" to drift out of sync
+- **Duel lifecycle:** a pure state machine (`server/duels/`) with four
+  states — `OPEN → LOCKED → SETTLED`, or `→ EXPIRED` — and no I/O at all, so
+  it's property-tested directly: thousands of randomized event sequences,
+  checked after every single step, confirm a duel can never settle twice,
+  never owe more than the two stakes actually in its pot, and never end up
+  in a terminal state with no one entitled to the money
 - **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
   only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
   creation — so a duel's stake can't sit in a trustless on-chain contract
@@ -125,6 +134,7 @@ server/
   db/               Schema, migrations, seed data
   paragraphs/       Deterministic daily paragraph + practice-pool logic
   runs/             POST /api/runs — server-side keystroke replay and validation
+  duels/            Pure OPEN/LOCKED/SETTLED/EXPIRED state machine, property-tested
 services/
   escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance
   nimiqWallet.ts    House wallet client (real @nimiq/core testnet light client)

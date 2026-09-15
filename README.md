@@ -1,74 +1,105 @@
-# Typing Duel
+<div align="center">
 
-A Nimiq Pay Mini App. Async 1v1 speed-typing duels with NIM stakes, server-refereed
-timing, and custodial escrow.
+# ⌨️ Typing Duel
 
-See [typing-duel-build-plan.md](typing-duel-build-plan.md) for the full phased build
-plan and [CLAUDE.md](CLAUDE.md) for the ground rules agents building this repo must
-follow.
+**Stake NIM. Type fast. Winner takes the pot.**
 
-## Status
+An async 1v1 speed-typing wager, built as a Nimiq Pay Mini App.
 
-**Phase 1 — Scaffold and mini app shell.** Vite + TS + React, wired to
-`@nimiq/mini-app-sdk`. Opening the app inside Nimiq Pay connects to the provider and
-lets you reveal your NIM address; opened in a normal browser it shows a fallback
-"open me inside Nimiq Pay" screen instead of crashing.
+</div>
 
-**Phase 2 — Data model and migrations.** `server/db/` holds the schema: `users`,
-`paragraphs`, `keystroke_runs`, `entries`, `duels`, `payouts`. An entry's `status`
-(`OPEN → LOCKED → SETTLED`, or `OPEN/LOCKED → EXPIRED`) is the duel lifecycle from
-the build plan — an explicit enum, not booleans. See
-`server/db/migrations/0001_init/up.sql` for the full schema and
-`server/db/types.ts` for the matching TS row types.
+---
 
-**Phase 3 — Paragraph service.** `server/paragraphs/` picks the daily paragraph
-deterministically from a 30-paragraph pool (`pool-data.ts`, tagged easy/medium/hard)
-by hashing the UTC calendar date, and `getPracticeParagraph()` always excludes
-whatever is live as today's daily paragraph. `service.ts` is pure (pool in,
-paragraph out) so it's tested directly — `npm test` checks 365 simulated days —
-while `repository.ts` is the thin layer that fetches the pool from SQLite.
+## What it is
 
-No typing engine, staking, or escrow yet — that's later phases. The server itself
-(an API, as opposed to these service modules) doesn't exist yet either.
+Typing Duel is a head-to-head typing game with real stakes. You stake NIM, type
+a paragraph as fast and accurately as you can, and get matched against someone
+else's hidden time. Whoever's faster — measured by the server, not the client —
+wins the pot.
 
-## Development
+No lobby to sit in, no opponent to wait for. Player A stakes and types whenever
+they want; Player B finds the open stake later and takes the bet. The duel is
+async by design — it fits inside the thirty seconds someone has between two
+other things.
+
+## Why Nimiq
+
+Nimiq settles in seconds and its Mini Apps run *inside* the wallet — no install,
+no separate account, no bridging funds around. For a game that's decided in
+under a minute, that's the whole pitch: connect, stake, type, know if you won,
+all without leaving the app you already have open.
+
+## How a duel works
+
+1. **Stake.** Player A commits NIM and starts typing. The paragraph is revealed
+   only after the stake is locked in.
+2. **Type blind.** The client streams every keystroke to the server as it
+   happens. The server — never the browser — computes the final time. A's time
+   stays hidden from everyone, including A, until the duel resolves.
+3. **Someone takes the bet.** Player B browses open stakes (opponent, amount,
+   age — never a time) and matches one. That locks the entry and starts B's
+   own run against the same paragraph.
+4. **Winner takes the pot.** The server compares both independently-verified
+   times, takes a small rake, and pays the winner on-chain. Ties refund both
+   sides in full.
+
+The one rule this whole project won't bend on: **the client never reports a
+time.** Every duration is recomputed server-side from the raw keystroke stream,
+so there's nothing to fake.
+
+## What makes it hard to cheat
+
+- Every keystroke is a timestamped event, not a final number the client hands
+  over — the server replays and re-times every run itself.
+- Statistical checks flag inhuman typing patterns: impossible WPM, robotically
+  uniform intervals, missing the natural speed-up/slow-down on common letter
+  pairs (`th` is fast, `qp` is slow — bots don't know that).
+- Flagged runs go to review instead of auto-voiding. False positives get
+  refunded; nobody gets silently robbed by a bad heuristic.
+
+## Under the hood
+
+- **Frontend:** Vite + React + TypeScript, talking to Nimiq Pay through
+  `@nimiq/mini-app-sdk`
+- **Data:** SQLite via Node's built-in `node:sqlite` — the entire data layer
+  ships with zero extra dependencies
+- **Tests:** Node's built-in test runner — no test framework dependency either
+- **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
+  only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
+  creation — so a duel's stake can't sit in a trustless on-chain contract
+  waiting for a winner to be decided. A house wallet holds both stakes and
+  releases them once the server has resolved the duel. That trade-off is
+  deliberate and stated up front, not hidden in the fine print.
+
+## Try it
 
 ```bash
 npm install
 npm run dev -- --host
 ```
 
-Note the **Network URL** Vite prints (not `localhost`), then inside Nimiq Pay go to
-**Mini Apps** and enter that URL. The dev machine and phone must be on the same
-Wi-Fi network.
-
-## Database
-
-SQLite via Node's built-in `node:sqlite` (experimental as of Node 22, but avoids
-adding a dependency for the whole data layer). The file lives at
-`server/db/data.sqlite` by default (gitignored); override with `DB_PATH`.
+Vite prints a **Network URL** (not `localhost`) — open that inside Nimiq Pay
+(Mini Apps → paste the URL). Your dev machine and phone need to be on the same
+Wi-Fi network. Opened in a regular browser instead, the app shows a clear
+"open me inside Nimiq Pay" screen rather than crashing.
 
 ```bash
-npm run db:migrate         # apply pending migrations
-npm run db:migrate:down    # revert the most recent migration
-npm run db:migrate:status  # list migrations and whether they're applied
-npm run db:seed            # seed a fake OPEN entry for local testing
+npm run db:migrate   # set up the local schema
+npm run db:seed      # seed the paragraph pool + a sample open entry
+npm test              # run the test suite
+npm run build          # typecheck everything + production build
 ```
 
-Migrations live in `server/db/migrations/<name>/{up,down}.sql`. Add a new
-numbered directory per schema change; never edit an already-applied migration.
+## Project layout
 
-## Tests
-
-```bash
-npm test
+```
+src/                React app — UI, wallet connection, typing engine
+server/
+  db/               Schema, migrations, seed data
+  paragraphs/       Deterministic daily paragraph + practice-pool logic
 ```
 
-Node's built-in test runner (`node --test`), no extra framework dependency.
+## Everything currently testnet-only
 
-## Custodial escrow
-
-Nimiq has no general smart contracts — only basic, vesting, and HTLC accounts, and
-an HTLC fixes its recipient at creation — so once staking lands (Phase 9), escrow is
-custodial by necessity: a house wallet holds staked NIM until a duel settles. This
-will be documented in code and expanded on here when that phase ships.
+No mainnet key ever touches this repo. Staking, escrow, and payouts run
+exclusively against Nimiq testnet until the app is ready to ship for real.

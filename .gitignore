@@ -14,6 +14,9 @@ dist-ssr
 
 .agents/*
 
+# Internal planning doc — not part of the public repo
+typing-duel-build-plan.md
+
 # Secrets — testnet keys only per CLAUDE.md, but never commit env files
 .env
 .env.*

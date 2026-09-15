@@ -1,14 +1,17 @@
 import { useRef, useState } from 'react'
 import { applyKeydown, computeCharStates, isExactMatch } from '../lib/typingEngine'
+import type { KeystrokeRun } from '../lib/timingEngine'
+import { EMPTY_RECORDER_STATE, recordKeystroke } from '../lib/timingEngine'
 
 interface Props {
   paragraph: string
-  onSubmit: () => void
+  onSubmit: (run: KeystrokeRun) => void
 }
 
 export function TypingEngine({ paragraph, onSubmit }: Props) {
   const [typed, setTyped] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const recorderRef = useRef(EMPTY_RECORDER_STATE)
 
   const states = computeCharStates(paragraph, typed)
   const complete = isExactMatch(paragraph, typed)
@@ -17,6 +20,12 @@ export function TypingEngine({ paragraph, onSubmit }: Props) {
     const next = applyKeydown(paragraph, typed, e.key)
     if (next !== typed) {
       e.preventDefault()
+      recorderRef.current = recordKeystroke(recorderRef.current, {
+        key: e.key,
+        nowMs: performance.now(),
+        resultingLength: next.length,
+        isMatch: isExactMatch(paragraph, next),
+      })
       setTyped(next)
     }
   }
@@ -48,7 +57,12 @@ export function TypingEngine({ paragraph, onSubmit }: Props) {
         onDragOver={(e) => e.preventDefault()}
       />
 
-      <button type="button" className="btn btn-primary" disabled={!complete} onClick={onSubmit}>
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={!complete}
+        onClick={() => onSubmit(recorderRef.current.run)}
+      >
         Submit
       </button>
     </div>

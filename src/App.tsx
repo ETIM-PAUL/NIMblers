@@ -3,10 +3,11 @@ import { AddressCard } from './components/AddressCard'
 import { ConnectionBanner } from './components/ConnectionBanner'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
 import { TypingEngine } from './components/TypingEngine'
+import { getRunDurationMs } from './lib/timingEngine'
 import { useNimiq } from './lib/useNimiq'
 
-// Phase 4 demo text. Phase 6 replaces this with a real paragraph fetched
-// through the paragraph service.
+// Temporary demo text — a later phase replaces this with a real paragraph
+// fetched through the paragraph service.
 const DEMO_PARAGRAPH = 'The quick brown fox jumps over the lazy dog.'
 
 function App() {
@@ -20,7 +21,7 @@ function App() {
     addressError,
     connectWallet,
   } = useNimiq()
-  const [submitted, setSubmitted] = useState(false)
+  const [durationMs, setDurationMs] = useState<number | null>(null)
 
   if (isConnecting) {
     return (
@@ -56,10 +57,15 @@ function App() {
         />
 
         <section className="section">
-          <h2 className="section-title">Practice (Phase 4 demo)</h2>
-          {submitted
-            ? <p className="section-note">Matched! (Nothing is saved yet — that's Phase 6.)</p>
-            : <TypingEngine paragraph={DEMO_PARAGRAPH} onSubmit={() => setSubmitted(true)} />}
+          <h2 className="section-title">Practice</h2>
+          {durationMs !== null
+            ? <p className="section-note">Matched in {Math.round(durationMs)}ms. (Nothing is saved yet.)</p>
+            : (
+                <TypingEngine
+                  paragraph={DEMO_PARAGRAPH}
+                  onSubmit={(run) => setDurationMs(getRunDurationMs(run))}
+                />
+              )}
         </section>
       </main>
     </div>

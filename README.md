@@ -51,6 +51,10 @@ so there's nothing to fake.
 
 - Every keystroke is a timestamped event, not a final number the client hands
   over — the server replays and re-times every run itself.
+- The clock starts on the first keystroke and freezes on the exact keystroke
+  that completes the paragraph — never on the Submit click. You can stare at
+  a finished duel for ten minutes before hitting Submit and the recorded time
+  won't move.
 - Statistical checks flag inhuman typing patterns: impossible WPM, robotically
   uniform intervals, missing the natural speed-up/slow-down on common letter
   pairs (`th` is fast, `qp` is slow — bots don't know that).

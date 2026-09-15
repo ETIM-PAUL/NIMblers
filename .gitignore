@@ -12,10 +12,15 @@ dist
 dist-ssr
 *.local
 
+.agents/*
+
 # Secrets — testnet keys only per CLAUDE.md, but never commit env files
 .env
 .env.*
 !.env.example
+
+# Local SQLite data
+server/db/*.sqlite
 
 # Editor directories and files
 .vscode/*

@@ -14,7 +14,15 @@ follow.
 lets you reveal your NIM address; opened in a normal browser it shows a fallback
 "open me inside Nimiq Pay" screen instead of crashing.
 
-No typing engine, staking, or escrow yet — that's later phases.
+**Phase 2 — Data model and migrations.** `server/db/` holds the schema: `users`,
+`paragraphs`, `keystroke_runs`, `entries`, `duels`, `payouts`. An entry's `status`
+(`OPEN → LOCKED → SETTLED`, or `OPEN/LOCKED → EXPIRED`) is the duel lifecycle from
+the build plan — an explicit enum, not booleans. See
+`server/db/migrations/0001_init/up.sql` for the full schema and
+`server/db/types.ts` for the matching TS row types.
+
+No typing engine, staking, or escrow yet — that's later phases. The server itself
+(an API that writes to this schema) doesn't exist yet either — only the data layer.
 
 ## Development
 
@@ -26,6 +34,22 @@ npm run dev -- --host
 Note the **Network URL** Vite prints (not `localhost`), then inside Nimiq Pay go to
 **Mini Apps** and enter that URL. The dev machine and phone must be on the same
 Wi-Fi network.
+
+## Database
+
+SQLite via Node's built-in `node:sqlite` (experimental as of Node 22, but avoids
+adding a dependency for the whole data layer). The file lives at
+`server/db/data.sqlite` by default (gitignored); override with `DB_PATH`.
+
+```bash
+npm run db:migrate         # apply pending migrations
+npm run db:migrate:down    # revert the most recent migration
+npm run db:migrate:status  # list migrations and whether they're applied
+npm run db:seed            # seed a fake OPEN entry for local testing
+```
+
+Migrations live in `server/db/migrations/<name>/{up,down}.sql`. Add a new
+numbered directory per schema change; never edit an already-applied migration.
 
 ## Custodial escrow
 

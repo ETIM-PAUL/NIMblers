@@ -49,21 +49,35 @@ all without leaving the app you already have open.
    locks an entry and then vanishes loses their claim on it the same way —
    the lock releases so someone else can take the bet, but their own stake
    isn't returned either, for the same anti-griefing reason.
+
+   Every entry is public or private — A's choice, made before staking. A
+   public entry lands on the open-duels dashboard for anyone to browse and
+   take. A private one skips the dashboard entirely; instead A gets back a
+   link that carries the entry's id — paste it into WhatsApp, DM it,
+   whatever. Tapping it opens Nimiq Pay, and the mini app loads straight
+   into that one duel instead of the browse list. Challenging still goes
+   through the exact same on-chain-verified stake and server-refereed race
+   either way — visibility only changes whether the entry is *discoverable*,
+   never how it's played or settled.
 2. **Type blind.** The client streams every keystroke to the server as it
    happens. The server — never the browser — computes the final time. A's time
    stays hidden from everyone, including A, until the duel resolves.
 3. **Someone takes the bet.** Player B browses open stakes (opponent, level,
-   amount, age — never a time) and matches one at that exact stake. That
-   locks the entry — the lock is what stops two challengers racing for the
-   same stake — and starts a timer for B's own run. If B never finishes, the
-   lock expires and the entry reopens for someone else; A's stake is never
-   at risk from a challenger who wanders off.
+   amount, age — never a time) and matches one at that exact stake, or
+   arrives straight at a private one through its link. That locks the entry
+   — the lock is what stops two challengers racing for the same stake — and
+   starts a timer for B's own run. If B never finishes, the lock expires and
+   the entry reopens for someone else; A's stake is never at risk from a
+   challenger who wanders off.
 4. **Winner takes the pot.** The instant B's run is recorded, the server
    compares both independently-verified times, takes a 10% rake, and pays
    the winner the rest — on-chain, automatically, no manual step. A tie
    refunds both stakes in full; nothing is raked from a refund. B's
    response carries the reveal: both times, the delta between them, and
    the transaction hash, so the outcome is checkable, not just asserted.
+
+Every win is public: a leaderboard ranks players by total NIM actually won,
+visible to anyone opening the app, wallet connected or not.
 
 The one rule this whole project won't bend on: **the client never reports a
 time.** Every duration is recomputed server-side from the raw keystroke stream,
@@ -148,6 +162,31 @@ so there's nothing to fake.
   in a row is refunded exactly once. A refund that fails mid-flight reverts
   its claim back to OPEN instead of stranding the stake in a status no
   future sweep would ever look at again.
+- **Leaderboard:** ranks players by the sum of their completed `PAYOUT`
+  rows — the same ledger `services/escrow.ts` already writes and already
+  guarantees can't double-count, so there's no separate "winnings" number
+  kept anywhere else to drift out of sync with what actually got paid. A
+  payout that's been claimed but hasn't sent yet (`tx_hash` still null)
+  doesn't count — an in-flight settlement hasn't won anything until it
+  lands. Stakes and refunds never appear here; it tracks winnings, not
+  activity.
+- **Public/private entries and shared links:** an entry's `visibility`
+  (`server/db/migrations/0004_entry_visibility`) is checked in exactly one
+  place — `GET /api/entries`, the dashboard listing — so it only ever
+  controls *discoverability*. A private link resolves through
+  `GET /api/entries/lookup?entryId=...`, which works for a private entry
+  precisely because knowing its id (an unguessable random UUID) is what a
+  link hands you; every other route (challenge, submit, settle) already
+  worked from a bare entry id and needed no visibility awareness at all.
+  Nimiq's provider SDK has no literal claimable-link primitive to build on
+  — no `createCashlink`/`claimCashlink` method exists in
+  `@nimiq/mini-app-sdk` — so a shared duel link isn't an on-chain Cashlink
+  carrying value; it's a `nimiqpay://miniapp?url=...` deep link (the same
+  scheme this app is already opened with) whose inner URL carries a
+  `?duel=<entryId>` query param. Opening it loads the mini app straight
+  into that one duel's invite card instead of the browse list; the actual
+  stake still moves through the same on-chain-verified, custodial flow
+  every other duel uses.
 
 ## Try it
 
@@ -182,6 +221,8 @@ server/
   duels/            Pure state machine, Player B's flow (browse, challenge, submit,
                     settle), and the expiry/refund sweep
   entries/          Player A's flow — stake, reveal, submit, create the OPEN entry
+                    at a chosen difficulty and visibility (public/private)
+  leaderboard/      GET /api/leaderboard — ranks players by total NIM won
 services/
   escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance
   nimiqWallet.ts    House wallet client (real @nimiq/core testnet light client)

@@ -187,6 +187,41 @@ test('createEntry is idempotent per stakeTxHash — a retried submit returns the
   assert.equal(count.c, 1)
 })
 
+test('createEntry defaults to PUBLIC when visibility is not specified', async () => {
+  const wallet = createFakeWallet()
+  const today = getDailyParagraphForToday(db, 'easy')
+  const result = await createEntry(db, wallet, {
+    nimAddress: PLAYER_ADDRESS,
+    stakeTxHash: 'stake-tx-1',
+    difficulty: 'easy',
+    events: honestEventsFor(today.body),
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.visibility, 'PUBLIC')
+  const row = db.prepare('SELECT visibility FROM entries WHERE id = ?').get(result.entryId) as { visibility: string }
+  assert.equal(row.visibility, 'PUBLIC')
+})
+
+test('createEntry stores PRIVATE when the caller asks for it', async () => {
+  const wallet = createFakeWallet()
+  const today = getDailyParagraphForToday(db, 'easy')
+  const result = await createEntry(db, wallet, {
+    nimAddress: PLAYER_ADDRESS,
+    stakeTxHash: 'stake-tx-1',
+    difficulty: 'easy',
+    events: honestEventsFor(today.body),
+    visibility: 'PRIVATE',
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.visibility, 'PRIVATE')
+  const row = db.prepare('SELECT visibility FROM entries WHERE id = ?').get(result.entryId) as { visibility: string }
+  assert.equal(row.visibility, 'PRIVATE')
+})
+
 test('a stake with no completed submission creates no entry — closing the tab mid-run forfeits, it is not refunded', async () => {
   const wallet = createFakeWallet()
 

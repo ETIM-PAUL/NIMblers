@@ -1,7 +1,7 @@
 import { getDb } from '../db/client.ts'
 import { readJsonBody, sendJson } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
-import { isDifficulty, parseEvents, parseStakeBody } from '../http/validation.ts'
+import { isDifficulty, isVisibilityOrUndefined, parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from './houseWallet.ts'
 import { createEntry, DUEL_STAKE_LUNA_BY_DIFFICULTY, revealEntry } from './service.ts'
 
@@ -65,9 +65,15 @@ export function registerEntryRoutes(router: Router): void {
     }
 
     const stakeInput = parseStakeBody(parsedBody)
-    const difficulty = (parsedBody as Record<string, unknown> | null)?.difficulty
+    const body = parsedBody as Record<string, unknown> | null
+    const difficulty = body?.difficulty
+    const visibility = body?.visibility
     if (!stakeInput || !isDifficulty(difficulty)) {
       sendJson(res, 400, { error: 'nimAddress and stakeTxHash must be strings, and difficulty must be easy, medium, or hard' })
+      return
+    }
+    if (!isVisibilityOrUndefined(visibility)) {
+      sendJson(res, 400, { error: 'visibility, if given, must be PUBLIC or PRIVATE' })
       return
     }
     const events = parseEvents((parsedBody as Record<string, unknown>).events)
@@ -78,12 +84,12 @@ export function registerEntryRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await createEntry(getDb(), wallet, { ...stakeInput, difficulty, events })
+      const result = await createEntry(getDb(), wallet, { ...stakeInput, difficulty, events, visibility })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return
       }
-      sendJson(res, 201, { entryId: result.entryId, status: result.status, expiresAt: result.expiresAt })
+      sendJson(res, 201, { entryId: result.entryId, status: result.status, expiresAt: result.expiresAt, visibility: result.visibility })
     }
     catch (error) {
       sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })

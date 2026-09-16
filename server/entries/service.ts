@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Difficulty, EntryStatus } from '../db/types.ts'
+import type { Difficulty, EntryStatus, EntryVisibility } from '../db/types.ts'
 import { getOrCreateUser } from '../db/users.ts'
 import { getDailyParagraphForToday } from '../paragraphs/repository.ts'
 import { submitRun } from '../runs/service.ts'
@@ -71,7 +71,7 @@ export async function revealEntry(
 }
 
 export type CreateEntryResult =
-  | { ok: true, entryId: string, status: EntryStatus, expiresAt: string }
+  | { ok: true, entryId: string, status: EntryStatus, expiresAt: string, visibility: EntryVisibility }
   | { ok: false, reason: string }
 
 /**
@@ -92,21 +92,28 @@ export type CreateEntryResult =
  * The result never includes a duration. Nobody — not even A — ever
  * receives A's own time back over the network; it stays server-side until
  * the duel resolves.
+ *
+ * `visibility` defaults to `PUBLIC` (today's behavior — listed for anyone
+ * to browse). `PRIVATE` skips the open-duels dashboard entirely; the only
+ * way to reach it is the shareable link the caller builds from the
+ * returned `entryId`, since knowing the (unguessable) id is what stands in
+ * for an invite.
  */
 export async function createEntry(
   db: DatabaseSync,
   wallet: HouseWallet,
-  input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty, events: KeystrokeEvent[] },
+  input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty, events: KeystrokeEvent[], visibility?: EntryVisibility },
 ): Promise<CreateEntryResult> {
   const existing = db
-    .prepare('SELECT id, status, expires_at FROM entries WHERE stake_tx_hash = ?')
-    .get(input.stakeTxHash) as { id: string, status: EntryStatus, expires_at: string } | undefined
+    .prepare('SELECT id, status, expires_at, visibility FROM entries WHERE stake_tx_hash = ?')
+    .get(input.stakeTxHash) as { id: string, status: EntryStatus, expires_at: string, visibility: EntryVisibility } | undefined
   if (existing) {
-    return { ok: true, entryId: existing.id, status: existing.status, expiresAt: existing.expires_at }
+    return { ok: true, entryId: existing.id, status: existing.status, expiresAt: existing.expires_at, visibility: existing.visibility }
   }
 
   const userId = getOrCreateUser(db, input.nimAddress)
   const stakeLuna = DUEL_STAKE_LUNA_BY_DIFFICULTY[input.difficulty]
+  const visibility = input.visibility ?? 'PUBLIC'
 
   const stake = await confirmStake(db, wallet, userId, { ...input, valueLuna: stakeLuna })
   if (!stake.ok) return stake
@@ -122,9 +129,9 @@ export async function createEntry(
   const expiresAt = new Date(now.getTime() + DEFAULT_ENTRY_TTL_MS).toISOString()
   db.prepare(
     `INSERT INTO entries
-      (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
-      VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
-  ).run(entryId, userId, paragraph.id, runResult.runId, stakeLuna, now.toISOString(), expiresAt, input.stakeTxHash)
+      (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash, visibility)
+      VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)`,
+  ).run(entryId, userId, paragraph.id, runResult.runId, stakeLuna, now.toISOString(), expiresAt, input.stakeTxHash, visibility)
 
-  return { ok: true, entryId, status: 'OPEN', expiresAt }
+  return { ok: true, entryId, status: 'OPEN', expiresAt, visibility }
 }

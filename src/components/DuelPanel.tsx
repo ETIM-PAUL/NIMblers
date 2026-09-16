@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import type { Difficulty, HouseAddressInfo } from '../lib/api'
-import { DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatLuna, readJsonOrThrow } from '../lib/api'
+import type { Difficulty, HouseAddressInfo, Visibility } from '../lib/api'
+import { buildDuelDeepLink, DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatLuna, readJsonOrThrow } from '../lib/api'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -15,12 +15,14 @@ type Stage =
   | { name: 'revealing', difficulty: Difficulty, stakeTxHash: string }
   | { name: 'typing', difficulty: Difficulty, stakeTxHash: string, paragraph: string }
   | { name: 'submitting', difficulty: Difficulty, stakeTxHash: string }
-  | { name: 'waiting', entryId: string, expiresAt: string }
+  | { name: 'waiting', entryId: string, expiresAt: string, visibility: Visibility }
   | { name: 'error', message: string, difficulty: Difficulty, stakeTxHash: string | null }
 
 export function DuelPanel({ address, sendPayment }: Props) {
   const [stage, setStage] = useState<Stage>({ name: 'picking' })
+  const [visibility, setVisibility] = useState<Visibility>('PUBLIC')
   const [houseInfo, setHouseInfo] = useState<HouseAddressInfo | null>(null)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   useEffect(() => {
     fetchHouseAddress().then(setHouseInfo).catch(() => {
@@ -63,13 +65,25 @@ export function DuelPanel({ address, sendPayment }: Props) {
       const res = await fetch('/api/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events }),
+        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events, visibility }),
       })
       const body = await readJsonOrThrow(res, 'Could not submit your run')
-      setStage({ name: 'waiting', entryId: body.entryId as string, expiresAt: body.expiresAt as string })
+      setCopyStatus('idle')
+      setStage({ name: 'waiting', entryId: body.entryId as string, expiresAt: body.expiresAt as string, visibility: body.visibility as Visibility })
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error), difficulty, stakeTxHash })
+    }
+  }
+
+  async function copyDeepLink(entryId: string) {
+    const link = buildDuelDeepLink(entryId)
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopyStatus('copied')
+    }
+    catch {
+      setCopyStatus('failed')
     }
   }
 
@@ -84,6 +98,22 @@ export function DuelPanel({ address, sendPayment }: Props) {
           Once you stake, closing this tab before you finish typing forfeits the stake — it is not
           automatically refunded. Only a fully OPEN entry that nobody challenges within 24h gets refunded.
         </p>
+        <div className="visibility-picker">
+          <button
+            type="button"
+            className={`btn btn-toggle ${visibility === 'PUBLIC' ? 'btn-toggle-active' : ''}`}
+            onClick={() => setVisibility('PUBLIC')}
+          >
+            Public — anyone can find it
+          </button>
+          <button
+            type="button"
+            className={`btn btn-toggle ${visibility === 'PRIVATE' ? 'btn-toggle-active' : ''}`}
+            onClick={() => setVisibility('PRIVATE')}
+          >
+            Private — invite by link
+          </button>
+        </div>
         <div className="difficulty-picker">
           {DIFFICULTIES.map((d) => (
             <button
@@ -126,6 +156,26 @@ export function DuelPanel({ address, sendPayment }: Props) {
   }
 
   if (stage.name === 'waiting') {
+    if (stage.visibility === 'PRIVATE') {
+      const link = buildDuelDeepLink(stage.entryId)
+      return (
+        <div className="duel-panel">
+          <p className="section-note-best">Private entry created — share this link to invite someone.</p>
+          <p className="section-note">
+            It's hidden from the open-duels dashboard; only whoever taps this link can find and challenge it.
+            Your time is hidden from everyone, including you, until they finish. Refunded automatically if
+            nobody challenges within 24 hours (by {new Date(stage.expiresAt).toLocaleString()}).
+          </p>
+          <input className="share-link-input" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+          <button type="button" className="btn btn-primary" onClick={() => void copyDeepLink(stage.entryId)}>
+            {copyStatus === 'copied' ? 'Copied!' : 'Copy link'}
+          </button>
+          {copyStatus === 'failed' && (
+            <p className="address-card-error">Couldn't copy automatically — select the link above and copy it manually.</p>
+          )}
+        </div>
+      )
+    }
     return (
       <div className="duel-panel">
         <p className="section-note-best">Entry created — waiting for a challenger.</p>

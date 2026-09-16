@@ -2,6 +2,9 @@ export type EntryStatus = 'OPEN' | 'LOCKED' | 'SETTLED' | 'EXPIRED'
 
 export type Difficulty = 'easy' | 'medium' | 'hard'
 
+/** PUBLIC entries are listed for anyone to browse; PRIVATE ones are reachable only via their shareable link. */
+export type EntryVisibility = 'PUBLIC' | 'PRIVATE'
+
 export type PayoutType = 'STAKE_RECEIVED' | 'PAYOUT' | 'REFUND'
 
 export interface UserRow {
@@ -39,6 +42,7 @@ export interface EntryRow {
   expires_at: string
   /** The on-chain stake transaction that funded this entry. UNIQUE — one stake can only ever back one entry. */
   stake_tx_hash: string | null
+  visibility: EntryVisibility
 }
 
 export interface DuelRow {

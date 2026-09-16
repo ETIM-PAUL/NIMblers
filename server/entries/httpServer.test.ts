@@ -141,15 +141,37 @@ test('POST /api/entries creates an OPEN entry at the difficulty\'s stake amount,
   assert.equal(res.status, 201)
   assertNoDurationLeak(text)
 
-  const body = JSON.parse(text) as { entryId: string, status: string, expiresAt: string }
+  const body = JSON.parse(text) as { entryId: string, status: string, expiresAt: string, visibility: string }
   assert.equal(body.status, 'OPEN')
   assert.ok(body.entryId)
   assert.ok(body.expiresAt)
-  // Exactly these three keys — nothing extra snuck into the response.
-  assert.deepEqual(Object.keys(body).sort(), ['entryId', 'expiresAt', 'status'])
+  assert.equal(body.visibility, 'PUBLIC', 'defaults to public when the caller does not specify')
+  // Exactly these four keys — nothing extra snuck into the response.
+  assert.deepEqual(Object.keys(body).sort(), ['entryId', 'expiresAt', 'status', 'visibility'])
 
   const row = getDb().prepare('SELECT stake_luna FROM entries WHERE id = ?').get(body.entryId) as { stake_luna: number }
   assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY.hard)
+})
+
+test('POST /api/entries stores PRIVATE when asked, and rejects a bogus visibility value', async () => {
+  const today = getDailyParagraphForToday(getDb(), 'easy')
+  const events = today.body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+
+  const privateRes = await fetch(`${baseUrl}/api/entries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-private', difficulty: 'easy', events, visibility: 'PRIVATE' }),
+  })
+  assert.equal(privateRes.status, 201)
+  const privateBody = (await privateRes.json()) as { visibility: string }
+  assert.equal(privateBody.visibility, 'PRIVATE')
+
+  const bogusRes = await fetch(`${baseUrl}/api/entries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-bogus', difficulty: 'easy', events, visibility: 'SECRET' }),
+  })
+  assert.equal(bogusRes.status, 400)
 })
 
 test('POST /api/entries with a tampered run is rejected, with no timing data in the error response either', async () => {

@@ -3,7 +3,7 @@ import { readJsonBody, sendJson, getQueryParams } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
 import { parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from '../entries/houseWallet.ts'
-import { challengeEntry, listOpenEntries, submitChallenge } from './service.ts'
+import { challengeEntry, getEntryForChallenge, listOpenEntries, submitChallenge } from './service.ts'
 
 /**
  * Registers Player B's flow: browse open entries, challenge one (stake
@@ -17,6 +17,24 @@ export function registerDuelRoutes(router: Router): void {
     const exclude = getQueryParams(req).get('exclude') ?? undefined
     const entries = listOpenEntries(getDb(), exclude)
     sendJson(res, 200, { entries })
+  })
+
+  // Resolves a shared duel link — works for a PRIVATE entry too, since
+  // knowing its id (from the link) is what stands in for an invite here.
+  router.get('/api/entries/lookup', (req, res) => {
+    const params = getQueryParams(req)
+    const entryId = params.get('entryId')
+    const exclude = params.get('exclude') ?? undefined
+    if (!entryId) {
+      sendJson(res, 400, { error: 'entryId query param is required' })
+      return
+    }
+    const result = getEntryForChallenge(getDb(), entryId, exclude)
+    if (!result.ok) {
+      sendJson(res, 404, { error: result.reason })
+      return
+    }
+    sendJson(res, 200, { entry: result.entry })
   })
 
   router.post('/api/entries/challenge', async (req, res) => {

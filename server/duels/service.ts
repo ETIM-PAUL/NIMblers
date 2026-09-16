@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Difficulty, DuelRow, EntryRow } from '../db/types.ts'
+import type { Difficulty, DuelRow, EntryRow, EntryVisibility } from '../db/types.ts'
 import { getOrCreateUser, getUserAddress } from '../db/users.ts'
 import { confirmStake } from '../entries/service.ts'
 import { submitRun } from '../runs/service.ts'
@@ -29,7 +29,13 @@ export interface OpenEntrySummary {
   createdAt: string
 }
 
-/** Opponent address, stake, difficulty, and age only — never a time. Excludes the caller's own entries and anything past its 24h window. */
+/**
+ * Opponent address, stake, difficulty, and age only — never a time.
+ * Excludes the caller's own entries, anything past its 24h window, and —
+ * this is the dashboard, not a lookup — any entry its creator marked
+ * PRIVATE. A private entry is discoverable only through the shareable
+ * link that carries its id directly; see `getEntryForChallenge`.
+ */
 export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): OpenEntrySummary[] {
   const nowIso = new Date().toISOString()
   const rows = db
@@ -38,7 +44,7 @@ export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): O
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
        JOIN paragraphs p ON p.id = e.paragraph_id
-       WHERE e.status = 'OPEN' AND e.expires_at > ?
+       WHERE e.status = 'OPEN' AND e.expires_at > ? AND e.visibility = 'PUBLIC'
        ORDER BY e.created_at ASC`,
     )
     .all(nowIso) as { entry_id: string, creator_address: string, stake_luna: number, difficulty: Difficulty, created_at: string }[]
@@ -52,6 +58,58 @@ export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): O
       difficulty: row.difficulty,
       createdAt: row.created_at,
     }))
+}
+
+export type EntryLookupResult =
+  | { ok: true, entry: OpenEntrySummary & { visibility: EntryVisibility } }
+  | { ok: false, reason: string }
+
+/**
+ * Looks up a single entry by id, regardless of its visibility — this is
+ * what a shared link resolves through. Knowing the id (an unguessable
+ * random UUID) stands in for having been invited; the entry still has to
+ * actually be open, unexpired, and not the caller's own for a challenge to
+ * make sense, so those are checked here too rather than leaving it to
+ * `challengeEntry` to fail confusingly later.
+ */
+export function getEntryForChallenge(db: DatabaseSync, entryId: string, excludeNimAddress?: string): EntryLookupResult {
+  const row = db
+    .prepare(
+      `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at, e.status, e.expires_at, e.visibility
+       FROM entries e
+       JOIN users u ON u.id = e.creator_user_id
+       JOIN paragraphs p ON p.id = e.paragraph_id
+       WHERE e.id = ?`,
+    )
+    .get(entryId) as
+    | {
+        entry_id: string
+        creator_address: string
+        stake_luna: number
+        difficulty: Difficulty
+        created_at: string
+        status: string
+        expires_at: string
+        visibility: EntryVisibility
+      }
+    | undefined
+  if (!row) return { ok: false, reason: 'unknown entry' }
+  if (row.creator_address === excludeNimAddress) return { ok: false, reason: 'cannot challenge your own entry' }
+  if (row.status !== 'OPEN' || new Date(row.expires_at).getTime() <= Date.now()) {
+    return { ok: false, reason: 'this duel is no longer open' }
+  }
+
+  return {
+    ok: true,
+    entry: {
+      entryId: row.entry_id,
+      creatorAddress: row.creator_address,
+      stakeLuna: row.stake_luna,
+      difficulty: row.difficulty,
+      createdAt: row.created_at,
+      visibility: row.visibility,
+    },
+  }
 }
 
 export type ChallengeResult =

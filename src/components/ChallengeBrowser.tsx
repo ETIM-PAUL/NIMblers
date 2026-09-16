@@ -7,6 +7,8 @@ import { TypingEngine } from './TypingEngine'
 interface Props {
   address: string
   sendPayment: (recipient: string, valueLuna: number) => Promise<string>
+  /** Set when the app was opened via a private duel's shared link — skips browsing and jumps straight to that one entry. */
+  presetEntryId?: string
 }
 
 interface OpenEntry {
@@ -27,6 +29,8 @@ interface Reveal {
 
 type Stage =
   | { name: 'browsing' }
+  | { name: 'loading-invite' }
+  | { name: 'invite', entry: OpenEntry }
   | { name: 'staking', entryId: string }
   | { name: 'challenging', entryId: string, stakeTxHash: string }
   | { name: 'typing', entryId: string, paragraph: string }
@@ -38,8 +42,8 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
-export function ChallengeBrowser({ address, sendPayment }: Props) {
-  const [stage, setStage] = useState<Stage>({ name: 'browsing' })
+export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props) {
+  const [stage, setStage] = useState<Stage>(presetEntryId ? { name: 'loading-invite' } : { name: 'browsing' })
   const [entries, setEntries] = useState<OpenEntry[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
 
@@ -58,6 +62,22 @@ export function ChallengeBrowser({ address, sendPayment }: Props) {
   useEffect(() => {
     if (stage.name === 'browsing') void loadEntries()
   }, [stage.name, loadEntries])
+
+  useEffect(() => {
+    if (!presetEntryId) return
+    let cancelled = false
+    fetch(`/api/entries/lookup?entryId=${encodeURIComponent(presetEntryId)}&exclude=${encodeURIComponent(address)}`)
+      .then((res) => readJsonOrThrow(res, 'Could not load this duel'))
+      .then((body) => {
+        if (!cancelled) setStage({ name: 'invite', entry: body.entry as OpenEntry })
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setStage({ name: 'error', message: errorMessage(error) })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [presetEntryId, address])
 
   async function challenge(entryId: string, stakeTxHash: string) {
     setStage({ name: 'challenging', entryId, stakeTxHash })
@@ -133,6 +153,36 @@ export function ChallengeBrowser({ address, sendPayment }: Props) {
         <button type="button" className="btn btn-secondary" onClick={() => void loadEntries()}>
           Refresh
         </button>
+      </div>
+    )
+  }
+
+  if (stage.name === 'loading-invite') {
+    return <p className="section-note">Loading this duel…</p>
+  }
+
+  if (stage.name === 'invite') {
+    const { entry } = stage
+    return (
+      <div className="duel-panel">
+        <p className="section-note-best">You've been challenged to a duel.</p>
+        <ul className="entry-list">
+          <li className="entry-list-item">
+            <div className="entry-list-info">
+              <span className="entry-list-address">{entry.creatorAddress}</span>
+              <span className="entry-list-meta">
+                {DIFFICULTY_LABELS[entry.difficulty]} · {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna)}
+            >
+              Challenge
+            </button>
+          </li>
+        </ul>
       </div>
     )
   }

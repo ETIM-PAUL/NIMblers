@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { challengeEntry, listOpenEntries, submitChallenge } from './service.ts'
+import { challengeEntry, getEntryForChallenge, listOpenEntries, submitChallenge } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -115,6 +115,68 @@ test('listOpenEntries excludes entries that are no longer OPEN', () => {
 test('listOpenEntries excludes entries past their 24h window', () => {
   db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
   assert.equal(listOpenEntries(db).length, 0)
+})
+
+test('listOpenEntries excludes PRIVATE entries — they are only reachable by their link', () => {
+  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  assert.equal(listOpenEntries(db).length, 0)
+})
+
+test('getEntryForChallenge finds a PRIVATE entry by id even though it is hidden from the dashboard', () => {
+  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+
+  assert.equal(listOpenEntries(db).length, 0, 'sanity check: still not listed')
+
+  const result = getEntryForChallenge(db, entryId)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.entry.entryId, entryId)
+  assert.equal(result.entry.creatorAddress, CREATOR_ADDRESS)
+  assert.equal(result.entry.visibility, 'PRIVATE')
+})
+
+test('getEntryForChallenge finds a PUBLIC entry too — the lookup works regardless of visibility', () => {
+  const result = getEntryForChallenge(db, entryId)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.entry.visibility, 'PUBLIC')
+})
+
+test('getEntryForChallenge rejects an unknown id', () => {
+  const result = getEntryForChallenge(db, 'does-not-exist')
+  assert.equal(result.ok, false)
+})
+
+test('getEntryForChallenge rejects the creator looking up their own entry', () => {
+  const result = getEntryForChallenge(db, entryId, CREATOR_ADDRESS)
+  assert.equal(result.ok, false)
+})
+
+test('getEntryForChallenge rejects an entry that is no longer OPEN', () => {
+  db.prepare("UPDATE entries SET status = 'LOCKED' WHERE id = ?").run(entryId)
+  const result = getEntryForChallenge(db, entryId)
+  assert.equal(result.ok, false)
+})
+
+test('getEntryForChallenge rejects an entry past its 24h window', () => {
+  db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
+  const result = getEntryForChallenge(db, entryId)
+  assert.equal(result.ok, false)
+})
+
+test('a PRIVATE entry can still be challenged and settled through the normal flow', async () => {
+  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  const wallet = fakeSettlingWallet()
+
+  const challengeResult = await challengeEntry(db, wallet, {
+    entryId,
+    nimAddress: CHALLENGER_ADDRESS,
+    stakeTxHash: 'private-challenge-tx',
+  })
+  assert.equal(challengeResult.ok, true)
+
+  const submitResult = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
+  assert.equal(submitResult.ok, true)
 })
 
 test('challengeEntry locks the entry, takes the stake, and reveals the paragraph', async () => {

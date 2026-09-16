@@ -106,6 +106,48 @@ test('GET /api/entries?exclude=<address> hides that address\'s own entries', asy
   assert.equal(body.entries.length, 0)
 })
 
+test('GET /api/entries excludes a PRIVATE entry from the dashboard listing', async () => {
+  getDb().prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  const res = await fetch(`${baseUrl}/api/entries`)
+  const body = (await res.json()) as { entries: unknown[] }
+  assert.equal(body.entries.length, 0)
+})
+
+test('GET /api/entries/lookup finds a PRIVATE entry by id, even though it is hidden from the dashboard', async () => {
+  getDb().prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+
+  const res = await fetch(`${baseUrl}/api/entries/lookup?entryId=${encodeURIComponent(entryId)}`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { entry: { entryId: string, creatorAddress: string, visibility: string } }
+  assert.equal(body.entry.entryId, entryId)
+  assert.equal(body.entry.creatorAddress, CREATOR_ADDRESS)
+  assert.equal(body.entry.visibility, 'PRIVATE')
+})
+
+test('GET /api/entries/lookup 404s on an unknown id', async () => {
+  const res = await fetch(`${baseUrl}/api/entries/lookup?entryId=does-not-exist`)
+  assert.equal(res.status, 404)
+})
+
+test('GET /api/entries/lookup 400s without an entryId', async () => {
+  const res = await fetch(`${baseUrl}/api/entries/lookup`)
+  assert.equal(res.status, 400)
+})
+
+test('a PRIVATE entry found via lookup can be challenged through the normal flow', async () => {
+  getDb().prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+
+  const lookup = await fetch(`${baseUrl}/api/entries/lookup?entryId=${encodeURIComponent(entryId)}`)
+  const { entry } = (await lookup.json()) as { entry: { entryId: string } }
+
+  const res = await fetch(`${baseUrl}/api/entries/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId: entry.entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'private-link-challenge-tx' }),
+  })
+  assert.equal(res.status, 200)
+})
+
 test('POST /api/entries/challenge locks the entry and reveals the paragraph, no duration anywhere', async () => {
   const res = await fetch(`${baseUrl}/api/entries/challenge`, {
     method: 'POST',

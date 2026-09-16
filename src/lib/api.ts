@@ -3,6 +3,17 @@ export type Difficulty = 'easy' | 'medium' | 'hard'
 export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
 
+export type Visibility = 'PUBLIC' | 'PRIVATE'
+
+/** The query param a shared duel link carries, and the deep link that opens Nimiq Pay straight to it. */
+export const DUEL_QUERY_PARAM = 'duel'
+
+export function buildDuelDeepLink(entryId: string): string {
+  const miniAppUrl = new URL(window.location.origin + window.location.pathname)
+  miniAppUrl.searchParams.set(DUEL_QUERY_PARAM, entryId)
+  return `nimiqpay://miniapp?url=${encodeURIComponent(miniAppUrl.toString())}`
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }

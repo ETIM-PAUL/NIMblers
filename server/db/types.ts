@@ -43,6 +43,8 @@ export interface EntryRow {
   /** The on-chain stake transaction that funded this entry. UNIQUE — one stake can only ever back one entry. */
   stake_tx_hash: string | null
   visibility: EntryVisibility
+  /** Double trial: whoever loses a first attempt against this entry gets offered a retry at double the stake. */
+  allow_rematch: 0 | 1
 }
 
 export interface DuelRow {
@@ -54,6 +56,10 @@ export interface DuelRow {
   lock_ttl_expires_at: string
   winner_user_id: string | null
   settled_at: string | null
+  /** Set the moment a losing first attempt is offered a retry; a sweep settles as a loss if this passes unused. */
+  retry_offer_expires_at: string | null
+  /** The challenger's second attempt, if they took it. */
+  retry_keystroke_run_id: string | null
 }
 
 export interface PayoutRow {

@@ -79,6 +79,14 @@ all without leaving the app you already have open.
 Every win is public: a leaderboard ranks players by total NIM actually won,
 visible to anyone opening the app, wallet connected or not.
 
+A can also opt an entry into **double trial** before staking, off by
+default. If they did, and B loses the first attempt, B doesn't see A's time
+yet — instead B gets a choice, right there, with zero further action ever
+needed from A: take the loss, or restake double and try again. That second
+attempt is final either way. Decide within a few minutes, or it settles as
+a loss on its own — nobody's stake sits in limbo waiting on somebody who
+walked away.
+
 The one rule this whole project won't bend on: **the client never reports a
 time.** Every duration is recomputed server-side from the raw keystroke stream,
 so there's nothing to fake.
@@ -158,17 +166,20 @@ so there's nothing to fake.
   only one payout row exists.
 - **Expiry sweep:** a scheduled job (`npm run expiry:sweep`, meant to run on
   a timer — nothing in this repo schedules it itself) refunds entries
-  nobody ever challenged within 24 hours and releases challenger locks
-  whose TTL lapsed with no submitted run. It decides both using the exact
-  same pure state-machine transitions the rest of the duel lifecycle is
-  property-tested against, so there's one definition of "expired" the
-  whole codebase agrees on. Each row is claimed with the same atomic
-  conditional `UPDATE ... WHERE status = '...'` the challenge lock already
-  relies on, so the sweep is safe to run twice, overlap with itself, or
-  retry after a crash — an entry created 25 hours ago and swept three times
-  in a row is refunded exactly once. A refund that fails mid-flight reverts
-  its claim back to OPEN instead of stranding the stake in a status no
-  future sweep would ever look at again.
+  nobody ever challenged within 24 hours, releases challenger locks whose
+  TTL lapsed with no submitted run, and settles an abandoned double-trial
+  retry as a loss once its own (much shorter) window passes. All three
+  decide the same way the rest of the duel lifecycle does — via the pure
+  Phase 10 state machine, or (for the retry case) the same
+  `finalizeSettlement` every other settlement path uses — so there's one
+  definition of "expired" or "settled" the whole codebase agrees on. Each
+  row is claimed with the same atomic conditional `UPDATE ... WHERE
+  status = '...'` the challenge lock already relies on, so the sweep is
+  safe to run twice, overlap with itself, or retry after a crash — an
+  entry created 25 hours ago and swept three times in a row is refunded
+  exactly once. A refund that fails mid-flight reverts its claim back to
+  OPEN instead of stranding the stake in a status no future sweep would
+  ever look at again.
 - **Leaderboard:** ranks players by the sum of their completed `PAYOUT`
   rows — the same ledger `services/escrow.ts` already writes and already
   guarantees can't double-count, so there's no separate "winnings" number
@@ -194,6 +205,23 @@ so there's nothing to fake.
   into that one duel's invite card instead of the browse list; the actual
   stake still moves through the same on-chain-verified, custodial flow
   every other duel uses.
+- **Double trial:** settlement doesn't have to happen the instant B
+  submits. If B's first attempt loses and the entry opted in
+  (`allow_rematch`), nothing is settled and A's time isn't revealed — the
+  duel sits in a pending state (`duels.retry_offer_expires_at`) instead.
+  From there it resolves exactly one of three ways, all converging on the
+  same money-moving code (`finalizeSettlement`): B explicitly takes the
+  loss (`declineRetry`), B stakes double and takes a final attempt
+  (`retryStake` → `retrySubmit`, comparing against A's *original* time —
+  A never types again), or nobody decides and the expiry sweep settles it
+  as a loss once the window passes (`settleAbandonedRetry`, the same
+  scheduled job that already handles abandoned locks and unclaimed
+  entries). The pure Phase 10 state machine's `SUBMIT` event carries the
+  challenger's actual total stake rather than assuming it mirrors the
+  creator's, so `settlementObligations` accounts correctly for a pot that
+  grew past the original 2x — a decisive win always takes the whole pot,
+  a tie always refunds each side exactly what *they* put in, whether or
+  not a retry happened.
 
 ## Try it
 
@@ -267,13 +295,18 @@ by `services/escrow.test.ts` against a fake wallet, no network required.
 npm run expiry:sweep
 ```
 
-runs the expiry/refund sweep once against the real house wallet — refunding
-entries nobody challenged in time and releasing stale challenger locks.
-Nothing in this repo schedules it; point a cron job (or your platform's
-scheduled-function equivalent) at this command, on whatever interval you're
-comfortable with — it's idempotent, so an overlapping or repeated run is
-safe. Its logic is covered by `server/duels/expiryJob.test.ts` against a
-fake wallet, no network required, for the same reason as above.
+runs the expiry/refund sweep once against the real house wallet —
+refunding entries nobody challenged in time, releasing stale challenger
+locks, and settling an abandoned double-trial retry as a loss. Nothing in
+this repo schedules it; point a cron job (or your platform's
+scheduled-function equivalent) at this command. It's idempotent, so an
+overlapping or repeated run is safe — but the retry window defaults to
+just a few minutes (`RETRY_DECISION_WINDOW_MS` in
+`server/duels/service.ts`), so run this on an interval short enough that
+an abandoned retry actually resolves promptly rather than sitting well
+past its own deadline. Its logic is covered by
+`server/duels/expiryJob.test.ts` against a fake wallet, no network
+required, for the same reason as above.
 
 ## Everything currently testnet-only
 

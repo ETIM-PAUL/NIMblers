@@ -33,3 +33,8 @@ export function isDifficulty(value: unknown): value is Difficulty {
 export function isVisibilityOrUndefined(value: unknown): value is EntryVisibility | undefined {
   return value === undefined || value === 'PUBLIC' || value === 'PRIVATE'
 }
+
+/** Optional — undefined means "not specified" (createEntry defaults that to false), not invalid. */
+export function isBooleanOrUndefined(value: unknown): value is boolean | undefined {
+  return value === undefined || typeof value === 'boolean'
+}

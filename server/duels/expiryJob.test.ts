@@ -79,6 +79,25 @@ async function insertLockedEntry(hoursSinceLocked: number): Promise<string> {
   return entryId
 }
 
+/** A challenged entry with double trial on, a losing first run recorded, and its retry window set. */
+async function insertPendingRetryEntry(hoursUntilDeadline: number): Promise<{ entryId: string, duelId: string }> {
+  const entryId = insertOpenEntry(1)
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeWallet()
+  const challengeResult = await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: `pending-stake-${entryId}` })
+  assert.equal(challengeResult.ok, true, 'setup: challenge must succeed')
+
+  const runId = randomUUID()
+  const challengerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
+  db.prepare(
+    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(runId, challengerId, PARAGRAPH_ID, '[]', 9000, new Date().toISOString()) // slower than the creator's seeded 5000ms — a loss
+  const duelRow = db.prepare('SELECT id FROM duels WHERE entry_id = ?').get(entryId) as { id: string }
+  const retryDeadline = new Date(Date.now() + hoursUntilDeadline * 60 * 60_000).toISOString()
+  db.prepare('UPDATE duels SET challenger_keystroke_run_id = ?, retry_offer_expires_at = ? WHERE id = ?').run(runId, retryDeadline, duelRow.id)
+  return { entryId, duelId: duelRow.id }
+}
+
 beforeEach(() => {
   closeDb()
   migrateUp()
@@ -216,4 +235,63 @@ test('a failed refund reverts the entry to OPEN so the next sweep retries instea
   // A later sweep, once the wallet is healthy again, successfully retries.
   const retry = await runExpirySweep(db, fakeWallet())
   assert.deepEqual(retry.refundedEntries, [entryId])
+})
+
+// --- Double trial: abandoned retries ---
+
+test('settles an abandoned double-trial retry as a loss once its window has passed', async () => {
+  const { entryId } = await insertPendingRetryEntry(-1) // deadline already 1h in the past
+  const wallet = fakeWallet()
+
+  const result = await runExpirySweep(db, wallet)
+
+  assert.deepEqual(result.settledAbandonedRetries, [entryId])
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(entry.status, 'SETTLED')
+
+  const creatorId2 = getOrCreateUser(db, CREATOR_ADDRESS)
+  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId2) as { amount_luna: number }
+  assert.ok(payoutRow, 'A must be paid for the abandoned retry')
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9), 'settles the original 2x pot only — no retry stake was ever taken')
+})
+
+test('leaves a pending retry alone until its window actually passes', async () => {
+  const { entryId } = await insertPendingRetryEntry(1) // deadline still 1h out
+  const result = await runExpirySweep(db, fakeWallet())
+
+  assert.deepEqual(result.settledAbandonedRetries, [])
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(entry.status, 'LOCKED')
+})
+
+test('never touches a duel whose retry has already been taken', async () => {
+  const { entryId, duelId } = await insertPendingRetryEntry(-1)
+  const retryRunId = randomUUID()
+  const challengerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
+  db.prepare(
+    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(retryRunId, challengerId, PARAGRAPH_ID, '[]', 4000, new Date().toISOString())
+  db.prepare('UPDATE duels SET retry_keystroke_run_id = ? WHERE id = ?').run(retryRunId, duelId)
+
+  const result = await runExpirySweep(db, fakeWallet())
+
+  assert.deepEqual(result.settledAbandonedRetries, [])
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(entry.status, 'LOCKED', 'the challenger is mid-retry — the sweep must not settle it out from under them')
+})
+
+test('an abandoned retry is settled exactly once across three consecutive sweeps', async () => {
+  const { entryId } = await insertPendingRetryEntry(-1)
+  const wallet = fakeWallet()
+
+  const first = await runExpirySweep(db, wallet)
+  const second = await runExpirySweep(db, wallet)
+  const third = await runExpirySweep(db, wallet)
+
+  assert.deepEqual(first.settledAbandonedRetries, [entryId])
+  assert.deepEqual(second.settledAbandonedRetries, [])
+  assert.deepEqual(third.settledAbandonedRetries, [])
+
+  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'").get() as { c: number }
+  assert.equal(payoutCount.c, 1)
 })

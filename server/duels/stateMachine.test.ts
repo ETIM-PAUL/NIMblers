@@ -70,7 +70,7 @@ test('a reopened entry can be challenged again by someone else', () => {
 test('LOCKED -> SUBMIT -> SETTLED with a decisive winner', () => {
   const open = freshOpenDuel()
   const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
-  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', now: 5000 })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', challengerStakeLuna: STAKE_LUNA, now: 5000 })
   assert.equal(settled.status, 'SETTLED')
   if (settled.status !== 'SETTLED') return
   assert.equal(settled.winnerUserId, 'b')
@@ -79,15 +79,24 @@ test('LOCKED -> SUBMIT -> SETTLED with a decisive winner', () => {
 test('LOCKED -> SUBMIT -> SETTLED with a tie (winnerUserId null)', () => {
   const open = freshOpenDuel()
   const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
-  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: null, now: 5000 })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: null, challengerStakeLuna: STAKE_LUNA, now: 5000 })
   assert.equal(settled.status, 'SETTLED')
   if (settled.status !== 'SETTLED') return
   assert.equal(settled.winnerUserId, null)
 })
 
+test('SUBMIT carries through a challenger stake larger than the creator\'s — a double-trial retry', () => {
+  const open = freshOpenDuel()
+  const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', challengerStakeLuna: STAKE_LUNA * 3, now: 5000 })
+  assert.equal(settled.status, 'SETTLED')
+  if (settled.status !== 'SETTLED') return
+  assert.equal(settled.challengerStakeLuna, STAKE_LUNA * 3)
+})
+
 test('SUBMIT on an OPEN (unlocked) duel is a no-op — nobody to compare times against', () => {
   const open = freshOpenDuel()
-  const unchanged = applyDuelEvent(open, { type: 'SUBMIT', winnerUserId: 'nobody', now: 1000 })
+  const unchanged = applyDuelEvent(open, { type: 'SUBMIT', winnerUserId: 'nobody', challengerStakeLuna: STAKE_LUNA, now: 1000 })
   assert.deepEqual(unchanged, open)
 })
 
@@ -124,12 +133,12 @@ test('a CHALLENGE arriving after the entry should already have expired is ignore
 test('every event is a no-op on a SETTLED duel', () => {
   const open = freshOpenDuel()
   const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
-  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', now: 1000 })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', challengerStakeLuna: STAKE_LUNA, now: 1000 })
 
   const events: DuelEvent[] = [
     { type: 'CHALLENGE', challengerUserId: 'c', now: 2000, lockTtlMs: LOCK_TTL_MS },
     { type: 'LOCK_TTL_EXPIRED', now: 999_999 },
-    { type: 'SUBMIT', winnerUserId: 'creator', now: 999_999 },
+    { type: 'SUBMIT', winnerUserId: 'creator', challengerStakeLuna: STAKE_LUNA, now: 999_999 },
     { type: 'ENTRY_EXPIRED', now: 999_999 },
   ]
   for (const event of events) {
@@ -144,7 +153,7 @@ test('every event is a no-op on an EXPIRED duel', () => {
   const events: DuelEvent[] = [
     { type: 'CHALLENGE', challengerUserId: 'b', now: ENTRY_TTL_MS + 1, lockTtlMs: LOCK_TTL_MS },
     { type: 'LOCK_TTL_EXPIRED', now: 999_999 },
-    { type: 'SUBMIT', winnerUserId: 'creator', now: 999_999 },
+    { type: 'SUBMIT', winnerUserId: 'creator', challengerStakeLuna: STAKE_LUNA, now: 999_999 },
     { type: 'ENTRY_EXPIRED', now: 999_999 },
   ]
   for (const event of events) {
@@ -170,17 +179,35 @@ test('settlementObligations refunds the creator in full when EXPIRED', () => {
 test('settlementObligations pays the winner the full pot on a decisive SETTLED', () => {
   const open = freshOpenDuel()
   const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
-  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', now: 1000 })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'b', challengerStakeLuna: STAKE_LUNA, now: 1000 })
   assert.deepEqual(settlementObligations(settled), [{ userId: 'b', amountLuna: STAKE_LUNA * 2 }])
 })
 
 test('settlementObligations refunds both players in full on a tie', () => {
   const open = freshOpenDuel()
   const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
-  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: null, now: 1000 })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: null, challengerStakeLuna: STAKE_LUNA, now: 1000 })
   assert.deepEqual(settlementObligations(settled), [
     { userId: 'creator', amountLuna: STAKE_LUNA },
     { userId: 'b', amountLuna: STAKE_LUNA },
+  ])
+})
+
+test('settlementObligations accounts for an uneven pot after a double-trial retry — winner takes it all', () => {
+  const open = freshOpenDuel()
+  const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
+  // B staked the original amount, then retried for double on top: 3x total.
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: 'creator', challengerStakeLuna: STAKE_LUNA * 3, now: 1000 })
+  assert.deepEqual(settlementObligations(settled), [{ userId: 'creator', amountLuna: STAKE_LUNA + STAKE_LUNA * 3 }])
+})
+
+test('settlementObligations refunds a post-retry tie proportionally — each side gets back only what they staked', () => {
+  const open = freshOpenDuel()
+  const locked = applyDuelEvent(open, { type: 'CHALLENGE', challengerUserId: 'b', now: 0, lockTtlMs: LOCK_TTL_MS })
+  const settled = applyDuelEvent(locked, { type: 'SUBMIT', winnerUserId: null, challengerStakeLuna: STAKE_LUNA * 3, now: 1000 })
+  assert.deepEqual(settlementObligations(settled), [
+    { userId: 'creator', amountLuna: STAKE_LUNA },
+    { userId: 'b', amountLuna: STAKE_LUNA * 3 },
   ])
 })
 
@@ -211,16 +238,19 @@ function randomEvent(rng: () => number, duel: Duel, now: number): DuelEvent {
   }
   if (choice < 0.8) {
     let winnerUserId: string | null = null
+    let challengerStakeLuna = STAKE_LUNA
     if (duel.status === 'LOCKED') {
       const r = rng()
       winnerUserId = r < 0.45 ? duel.creatorUserId : r < 0.9 ? duel.challengerUserId : null
+      // Sometimes exercise a double-trial retry having pushed the challenger's total stake to 3x.
+      challengerStakeLuna = rng() < 0.5 ? STAKE_LUNA : STAKE_LUNA * 3
     }
-    return { type: 'SUBMIT', winnerUserId, now }
+    return { type: 'SUBMIT', winnerUserId, challengerStakeLuna, now }
   }
   return { type: 'ENTRY_EXPIRED', now }
 }
 
-test('property: no sequence of events ever settles a duel twice, pays more than 2x the stake, or strands a stake', () => {
+test('property: no sequence of events ever settles a duel twice, pays more than the actual pot staked, or strands a stake', () => {
   const ITERATIONS = 500
   const STEPS_PER_ITERATION = 40
 
@@ -253,10 +283,11 @@ test('property: no sequence of events ever settles a duel twice, pays more than 
       }
       assert.ok(!(settledOnce && expiredOnce), `a duel must never reach both SETTLED and EXPIRED (${context})`)
 
-      // The pot is exactly 2x the stake — never owe more than that.
+      // The pot never exceeds the stake plus whatever the challenger actually
+      // staked (up to 3x after a double-trial retry) — never owe more than that.
       const obligations = settlementObligations(next)
       const totalOwed = obligations.reduce((sum, o) => sum + o.amountLuna, 0)
-      assert.ok(totalOwed <= STAKE_LUNA * 2, `owed ${totalOwed} exceeds the 2x-stake pot (${context})`)
+      assert.ok(totalOwed <= STAKE_LUNA * 4, `owed ${totalOwed} exceeds the largest possible pot (${context})`)
 
       // A terminal state always has a well-defined, claimable payout — no stranded stake.
       if (next.status === 'SETTLED' || next.status === 'EXPIRED') {

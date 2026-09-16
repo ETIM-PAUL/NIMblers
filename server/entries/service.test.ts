@@ -58,6 +58,7 @@ beforeEach(() => {
   for (const p of PARAGRAPH_POOL) insert.run(p.id, p.body, p.difficulty, now)
 })
 
+
 test('revealEntry verifies the stake and reveals today\'s daily paragraph for that difficulty', async () => {
   const wallet = createFakeWallet()
   const result = await revealEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy' })

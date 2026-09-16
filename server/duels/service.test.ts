@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { challengeEntry, getEntryForChallenge, listOpenEntries, submitChallenge } from './service.ts'
+import { challengeEntry, declineRetry, getEntryForChallenge, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -20,6 +20,11 @@ const STAKE_LUNA = 100_000
 
 function honestEventsFor(target: string): { key: string, tRelativeMs: number, resultingLength: number }[] {
   return target.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+}
+
+/** Slower than the creator's seeded 5000ms run — the challenger loses. */
+function slowEventsFor(target: string): { key: string, tRelativeMs: number, resultingLength: number }[] {
+  return target.split('').map((char, i) => ({ key: char, tRelativeMs: i * 800, resultingLength: i + 1 }))
 }
 
 /** A wallet whose `send()` throws — for tests that must never reach settlement's payout/refund step. */
@@ -320,7 +325,7 @@ test('submitChallenge records the challenger\'s run and settles the duel, reveal
   const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
 
   assert.equal(result.ok, true)
-  if (!result.ok) return
+  if (!result.ok || result.pending) return
   assert.equal(result.outcome, 'challenger')
   assert.equal(result.creatorDurationMs, 5000)
   assert.equal(result.challengerDurationMs, 700)
@@ -365,7 +370,7 @@ test('submitChallenge refunds both players in full on a tie, no rake taken', asy
   const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: tieEvents })
 
   assert.equal(result.ok, true)
-  if (!result.ok) return
+  if (!result.ok || result.pending) return
   assert.equal(result.outcome, 'tie')
   assert.equal(result.creatorDurationMs, result.challengerDurationMs)
   assert.equal(result.deltaMs, 0)
@@ -377,6 +382,218 @@ test('submitChallenge refunds both players in full on a tie, no rake taken', asy
 
   const duel = db.prepare('SELECT winner_user_id FROM duels WHERE entry_id = ?').get(entryId) as { winner_user_id: string | null }
   assert.equal(duel.winner_user_id, null)
+})
+
+// --- Double trial ---
+
+test('submitChallenge settles immediately on a win, even when the entry allows a rematch', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.pending, false)
+})
+
+test('submitChallenge settles immediately on a loss when the entry does not allow a rematch', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  assert.equal(result.ok, true)
+  if (!result.ok || result.pending) return
+  assert.equal(result.outcome, 'creator')
+})
+
+test('submitChallenge returns a pending decision on a loss when the entry allows a rematch — A\'s time stays hidden', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(result.pending, true)
+  if (!result.pending) return
+  assert.equal(result.retryStakeLuna, STAKE_LUNA * 2)
+  assert.ok(result.retryDeadline)
+  assert.ok(!('creatorDurationMs' in result), "A's time must not leak while a retry is still undecided")
+
+  const duel = db.prepare('SELECT settled_at, retry_offer_expires_at FROM duels WHERE entry_id = ?').get(entryId) as {
+    settled_at: string | null
+    retry_offer_expires_at: string | null
+  }
+  assert.equal(duel.settled_at, null, 'nothing should be settled yet')
+  assert.ok(duel.retry_offer_expires_at)
+
+  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type IN ('PAYOUT', 'REFUND')").get() as { c: number }
+  assert.equal(payoutCount.c, 0, 'no money should move until the retry is decided')
+})
+
+test('submitChallenge is idempotent for a pending decision — calling it again returns the same deadline, not a fresh one', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const events = slowEventsFor(TARGET)
+  const first = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
+  const second = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
+
+  assert.deepEqual(first, second, 'a retried call must not push the deadline out further')
+})
+
+test('retryStake verifies the doubled stake and rejects the un-doubled original amount', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const underpaid = await retryStake(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'retry-underpay-tx' })
+  assert.equal(underpaid.ok, false, 'the fake wallet reports the single stake amount here, not the doubled one')
+
+  const walletForDoubleStake: HouseWallet = {
+    ...wallet,
+    async getTransaction(txHash) {
+      return { txHash, senderAddress: CHALLENGER_ADDRESS, recipientAddress: HOUSE_ADDRESS, valueLuna: STAKE_LUNA * 2, state: 'confirmed', confirmations: 5 }
+    },
+  }
+  const paid = await retryStake(db, walletForDoubleStake, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'retry-good-tx' })
+  assert.equal(paid.ok, true)
+})
+
+test('retryStake rejects when no retry is pending for this entry', async () => {
+  const wallet = fakeWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await retryStake(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'whatever' })
+  assert.equal(result.ok, false)
+})
+
+test('retryStake rejects once the retry window has expired', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+  db.prepare('UPDATE duels SET retry_offer_expires_at = ? WHERE entry_id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
+
+  const result = await retryStake(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'too-late-tx' })
+  assert.equal(result.ok, false)
+})
+
+function walletForRetryStake(base: HouseWallet, valueLuna: number): HouseWallet {
+  return {
+    ...base,
+    async getTransaction(txHash) {
+      return { txHash, senderAddress: CHALLENGER_ADDRESS, recipientAddress: HOUSE_ADDRESS, valueLuna, state: 'confirmed', confirmations: 5 }
+    },
+  }
+}
+
+test('retrySubmit settles a challenger win on the retry — the pot is the original 2x plus the doubled retry stake', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const retryWallet = walletForRetryStake(wallet, STAKE_LUNA * 2)
+  const result = await retrySubmit(db, retryWallet, {
+    entryId,
+    nimAddress: CHALLENGER_ADDRESS,
+    stakeTxHash: 'retry-win-tx',
+    events: honestEventsFor(TARGET), // fast this time — the challenger wins the retry
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok || result.pending) return
+  assert.equal(result.outcome, 'challenger')
+
+  const winnerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
+  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(winnerId) as { amount_luna: number }
+  // Pot = creator's 1x + challenger's original 1x + challenger's retry 2x = 4x, minus the 10% rake.
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 4 * 0.9))
+
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(entry.status, 'SETTLED')
+})
+
+test('retrySubmit settles a second loss — "that is the end" — paying the creator the full 4x pot', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const retryWallet = walletForRetryStake(wallet, STAKE_LUNA * 2)
+  const result = await retrySubmit(db, retryWallet, {
+    entryId,
+    nimAddress: CHALLENGER_ADDRESS,
+    stakeTxHash: 'retry-lose-tx',
+    events: slowEventsFor(TARGET), // slow again — loses the retry too
+  })
+
+  assert.equal(result.ok, true)
+  if (!result.ok || result.pending) return
+  assert.equal(result.outcome, 'creator')
+
+  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId) as { amount_luna: number }
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 4 * 0.9))
+})
+
+test('retrySubmit is idempotent — calling it twice pays out once', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const retryWallet = walletForRetryStake(wallet, STAKE_LUNA * 2)
+  const input = { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'retry-idempotent-tx', events: honestEventsFor(TARGET) }
+  const first = await retrySubmit(db, retryWallet, input)
+  const second = await retrySubmit(db, retryWallet, input)
+
+  assert.deepEqual(first, second)
+  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'").get() as { c: number }
+  assert.equal(payoutCount.c, 1)
+})
+
+test('declineRetry settles immediately as a loss at the original pot only — no rake-free bonus for declining', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const result = await declineRetry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS })
+
+  assert.equal(result.ok, true)
+  if (!result.ok || result.pending) return
+  assert.equal(result.outcome, 'creator')
+
+  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId) as { amount_luna: number }
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9), 'declining settles the ORIGINAL 2x pot, not the retry-sized one')
+
+  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(entry.status, 'SETTLED')
+})
+
+test('declineRetry rejects when no retry is pending', async () => {
+  const wallet = fakeWallet()
+  await lockEntryForChallenger(db, wallet)
+  const result = await declineRetry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS })
+  assert.equal(result.ok, false)
+})
+
+test('declineRetry rejects once the retry has already been taken', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+  const retryWallet = walletForRetryStake(wallet, STAKE_LUNA * 2)
+  await retrySubmit(db, retryWallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'already-retried-tx', events: honestEventsFor(TARGET) })
+
+  const result = await declineRetry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS })
+  assert.equal(result.ok, true, 'the duel is already settled — reconstructs the real (retry) outcome instead of erroring')
+  if (!result.ok || result.pending) return
+  assert.equal(result.outcome, 'challenger', 'must reflect what actually happened (the retry), not re-decide it')
 })
 
 test('submitChallenge rejects when the entry has not been challenged', async () => {

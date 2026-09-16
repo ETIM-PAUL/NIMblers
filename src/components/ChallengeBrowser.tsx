@@ -20,13 +20,17 @@ interface OpenEntry {
   createdAt: string
 }
 
-interface Reveal {
+interface SettledReveal {
   outcome: 'creator' | 'challenger' | 'tie'
   creatorDurationMs: number
   challengerDurationMs: number
   deltaMs: number
   txHashes: string[]
 }
+
+type SubmitResult =
+  | { pending: true, retryDeadline: string, retryStakeLuna: number }
+  | ({ pending: false } & SettledReveal)
 
 type Stage =
   | { name: 'browsing' }
@@ -35,8 +39,13 @@ type Stage =
   | { name: 'staking', entryId: string, creatorAddress: string }
   | { name: 'challenging', entryId: string, creatorAddress: string, stakeTxHash: string }
   | { name: 'typing', entryId: string, creatorAddress: string, paragraph: string }
-  | { name: 'submitting', entryId: string, creatorAddress: string }
-  | { name: 'submitted', reveal: Reveal, creatorAddress: string }
+  | { name: 'submitting', entryId: string, creatorAddress: string, paragraph: string }
+  | { name: 'pending-retry', entryId: string, creatorAddress: string, paragraph: string, retryDeadline: string, retryStakeLuna: number }
+  | { name: 'retry-staking', entryId: string, creatorAddress: string, paragraph: string }
+  | { name: 'retry-typing', entryId: string, creatorAddress: string, paragraph: string, stakeTxHash: string }
+  | { name: 'retry-submitting', entryId: string, creatorAddress: string }
+  | { name: 'declining', entryId: string, creatorAddress: string }
+  | { name: 'settled', reveal: SettledReveal, creatorAddress: string }
   | { name: 'error', message: string }
 
 function formatSeconds(ms: number): string {
@@ -108,8 +117,24 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
     }
   }
 
-  async function handleSubmitRun(entryId: string, creatorAddress: string, run: KeystrokeRun) {
-    setStage({ name: 'submitting', entryId, creatorAddress })
+  function handleSubmitResult(creatorAddress: string, body: SubmitResult, fallback: { entryId: string, paragraph: string }) {
+    if (body.pending) {
+      setStage({
+        name: 'pending-retry',
+        entryId: fallback.entryId,
+        creatorAddress,
+        paragraph: fallback.paragraph,
+        retryDeadline: body.retryDeadline,
+        retryStakeLuna: body.retryStakeLuna,
+      })
+    }
+    else {
+      setStage({ name: 'settled', reveal: body, creatorAddress })
+    }
+  }
+
+  async function handleSubmitRun(entryId: string, creatorAddress: string, paragraph: string, run: KeystrokeRun) {
+    setStage({ name: 'submitting', entryId, creatorAddress, paragraph })
     try {
       const res = await fetch('/api/entries/challenge/submit', {
         method: 'POST',
@@ -117,7 +142,57 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         body: JSON.stringify({ entryId, nimAddress: address, events: run.events }),
       })
       const body = await readJsonOrThrow(res, 'Could not submit your run')
-      setStage({ name: 'submitted', reveal: body as unknown as Reveal, creatorAddress })
+      handleSubmitResult(creatorAddress, body as unknown as SubmitResult, { entryId, paragraph })
+    }
+    catch (error) {
+      setStage({ name: 'error', message: errorMessage(error) })
+    }
+  }
+
+  async function handleRetry(entryId: string, creatorAddress: string, paragraph: string, retryStakeLuna: number) {
+    setStage({ name: 'retry-staking', entryId, creatorAddress, paragraph })
+    try {
+      const house = await fetchHouseAddress()
+      const stakeTxHash = await sendPayment(house.address, retryStakeLuna)
+      const res = await fetch('/api/entries/challenge/retry/stake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId, nimAddress: address, stakeTxHash }),
+      })
+      await readJsonOrThrow(res, 'Could not verify the retry stake')
+      setStage({ name: 'retry-typing', entryId, creatorAddress, paragraph, stakeTxHash })
+    }
+    catch (error) {
+      setStage({ name: 'error', message: errorMessage(error) })
+    }
+  }
+
+  async function handleRetrySubmit(entryId: string, creatorAddress: string, stakeTxHash: string, run: KeystrokeRun) {
+    setStage({ name: 'retry-submitting', entryId, creatorAddress })
+    try {
+      const res = await fetch('/api/entries/challenge/retry/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId, nimAddress: address, stakeTxHash, events: run.events }),
+      })
+      const body = await readJsonOrThrow(res, 'Could not submit your retry')
+      setStage({ name: 'settled', reveal: body as unknown as SettledReveal, creatorAddress })
+    }
+    catch (error) {
+      setStage({ name: 'error', message: errorMessage(error) })
+    }
+  }
+
+  async function handleDecline(entryId: string, creatorAddress: string) {
+    setStage({ name: 'declining', entryId, creatorAddress })
+    try {
+      const res = await fetch('/api/entries/challenge/decline-retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId, nimAddress: address }),
+      })
+      const body = await readJsonOrThrow(res, 'Could not take the loss')
+      setStage({ name: 'settled', reveal: body as unknown as SettledReveal, creatorAddress })
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error) })
@@ -207,7 +282,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         </p>
         <TypingEngine
           paragraph={stage.paragraph}
-          onSubmit={(run) => void handleSubmitRun(stage.entryId, stage.creatorAddress, run)}
+          onSubmit={(run) => void handleSubmitRun(stage.entryId, stage.creatorAddress, stage.paragraph, run)}
         />
       </>
     )
@@ -217,7 +292,50 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
     return <p className="section-note">Submitting your run…</p>
   }
 
-  if (stage.name === 'submitted') {
+  if (stage.name === 'pending-retry') {
+    const { entryId, creatorAddress, paragraph, retryDeadline, retryStakeLuna } = stage
+    return (
+      <div className="duel-panel">
+        <p className="section-note">
+          You didn't beat it. Your opponent's time stays hidden either way — take the loss now, or stake
+          double and try again. Decide by {new Date(retryDeadline).toLocaleTimeString()}, or this settles as a
+          loss automatically.
+        </p>
+        <button type="button" className="btn btn-rematch" onClick={() => void handleRetry(entryId, creatorAddress, paragraph, retryStakeLuna)}>
+          Retry — stake {formatLuna(retryStakeLuna)}, double or nothing
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={() => void handleDecline(entryId, creatorAddress)}>
+          Take the loss
+        </button>
+      </div>
+    )
+  }
+
+  if (stage.name === 'retry-staking') {
+    return <p className="section-note">Confirm the retry stake in Nimiq Pay…</p>
+  }
+
+  if (stage.name === 'retry-typing') {
+    return (
+      <>
+        <p className="duel-warning">This is the final attempt — win or lose, it settles the duel.</p>
+        <TypingEngine
+          paragraph={stage.paragraph}
+          onSubmit={(run) => void handleRetrySubmit(stage.entryId, stage.creatorAddress, stage.stakeTxHash, run)}
+        />
+      </>
+    )
+  }
+
+  if (stage.name === 'retry-submitting') {
+    return <p className="section-note">Submitting your retry…</p>
+  }
+
+  if (stage.name === 'declining') {
+    return <p className="section-note">Taking the loss…</p>
+  }
+
+  if (stage.name === 'settled') {
     const { reveal, creatorAddress } = stage
     const youWon = reveal.outcome === 'challenger'
     const headline = reveal.outcome === 'tie'

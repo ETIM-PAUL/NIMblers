@@ -141,13 +141,14 @@ test('POST /api/entries creates an OPEN entry at the difficulty\'s stake amount,
   assert.equal(res.status, 201)
   assertNoDurationLeak(text)
 
-  const body = JSON.parse(text) as { entryId: string, status: string, expiresAt: string, visibility: string }
+  const body = JSON.parse(text) as { entryId: string, status: string, expiresAt: string, visibility: string, allowRematch: boolean }
   assert.equal(body.status, 'OPEN')
   assert.ok(body.entryId)
   assert.ok(body.expiresAt)
   assert.equal(body.visibility, 'PUBLIC', 'defaults to public when the caller does not specify')
-  // Exactly these four keys — nothing extra snuck into the response.
-  assert.deepEqual(Object.keys(body).sort(), ['entryId', 'expiresAt', 'status', 'visibility'])
+  assert.equal(body.allowRematch, false, 'defaults to no rematch when the caller does not specify')
+  // Exactly these five keys — nothing extra snuck into the response.
+  assert.deepEqual(Object.keys(body).sort(), ['allowRematch', 'entryId', 'expiresAt', 'status', 'visibility'])
 
   const row = getDb().prepare('SELECT stake_luna FROM entries WHERE id = ?').get(body.entryId) as { stake_luna: number }
   assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY.hard)

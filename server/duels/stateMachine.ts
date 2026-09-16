@@ -39,6 +39,13 @@ export interface SettledDuel extends DuelCommon {
   challengerUserId: string
   /** null means a tie — both players are refunded in full. */
   winnerUserId: string | null
+  /**
+   * What the challenger ultimately staked in total. Equal to `stakeLuna`
+   * unless a double-trial retry added a further stake on top — the
+   * challenger's own amount can differ from the creator's, unlike every
+   * other status where both sides are assumed symmetric.
+   */
+  challengerStakeLuna: number
 }
 
 export interface ExpiredDuel extends DuelCommon {
@@ -65,7 +72,7 @@ export function createOpenDuel(input: {
 export type DuelEvent =
   | { type: 'CHALLENGE', challengerUserId: string, now: number, lockTtlMs: number }
   | { type: 'LOCK_TTL_EXPIRED', now: number }
-  | { type: 'SUBMIT', winnerUserId: string | null, now: number }
+  | { type: 'SUBMIT', winnerUserId: string | null, challengerStakeLuna: number, now: number }
   | { type: 'ENTRY_EXPIRED', now: number }
 
 function commonFields(duel: Duel): DuelCommon {
@@ -112,6 +119,7 @@ export function applyDuelEvent(duel: Duel, event: DuelEvent): Duel {
         status: 'SETTLED',
         challengerUserId: duel.challengerUserId,
         winnerUserId: event.winnerUserId,
+        challengerStakeLuna: event.challengerStakeLuna,
       }
     }
     case 'ENTRY_EXPIRED': {
@@ -130,11 +138,16 @@ export interface PayoutObligation {
 /**
  * What escrow owes once a duel reaches a terminal state — empty for OPEN
  * or LOCKED, since nothing is owed until the duel actually resolves. The
- * full pot (both players' stakes) is always accounted for exactly once a
- * duel terminates. This does not model the house rake — Phase 13 applies
- * that on top when it wires this to real payouts; here, a decisive win
- * pays the winner the whole pot as the upper bound the rake gets
- * subtracted from.
+ * full pot (both players' stakes, whatever they actually came to) is
+ * always accounted for exactly once a duel terminates. This does not
+ * model the house rake — Phase 13 applies that on top when it wires this
+ * to real payouts; here, a decisive win pays the winner the whole pot as
+ * the upper bound the rake gets subtracted from.
+ *
+ * A tie refunds each side exactly what *they* put in — `stakeLuna` to the
+ * creator, `challengerStakeLuna` to the challenger — rather than assuming
+ * both staked the same amount, since a double-trial retry can leave the
+ * challenger having staked more than the creator ever did.
  */
 export function settlementObligations(duel: Duel): PayoutObligation[] {
   if (duel.status === 'EXPIRED') {
@@ -144,10 +157,10 @@ export function settlementObligations(duel: Duel): PayoutObligation[] {
     if (duel.winnerUserId === null) {
       return [
         { userId: duel.creatorUserId, amountLuna: duel.stakeLuna },
-        { userId: duel.challengerUserId, amountLuna: duel.stakeLuna },
+        { userId: duel.challengerUserId, amountLuna: duel.challengerStakeLuna },
       ]
     }
-    return [{ userId: duel.winnerUserId, amountLuna: duel.stakeLuna * 2 }]
+    return [{ userId: duel.winnerUserId, amountLuna: duel.stakeLuna + duel.challengerStakeLuna }]
   }
   return []
 }

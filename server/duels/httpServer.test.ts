@@ -32,7 +32,8 @@ function fakeWallet(): HouseWallet {
     },
     async getTransaction(txHash): Promise<HouseWalletTransaction | null> {
       const sender = txHash.includes('other') ? OTHER_CHALLENGER_ADDRESS : CHALLENGER_ADDRESS
-      return { txHash, senderAddress: sender, recipientAddress: HOUSE_ADDRESS, valueLuna: STAKE_LUNA, state: 'confirmed', confirmations: 5 }
+      const valueLuna = txHash.includes('retry') ? STAKE_LUNA * 2 : STAKE_LUNA
+      return { txHash, senderAddress: sender, recipientAddress: HOUSE_ADDRESS, valueLuna, state: 'confirmed', confirmations: 5 }
     },
     async close() {},
   }
@@ -201,6 +202,7 @@ test('POST /api/entries/challenge/submit settles the duel and reveals both times
   assert.equal(res.status, 201)
   const body = JSON.parse(text) as {
     ok: boolean
+    pending: boolean
     outcome: string
     creatorDurationMs: number
     challengerDurationMs: number
@@ -208,6 +210,7 @@ test('POST /api/entries/challenge/submit settles the duel and reveals both times
     txHashes: string[]
   }
   assert.equal(body.ok, true)
+  assert.equal(body.pending, false)
   assert.equal(body.outcome, 'challenger')
   assert.equal(body.creatorDurationMs, 5000)
   assert.equal(body.challengerDurationMs, 700)
@@ -217,6 +220,100 @@ test('POST /api/entries/challenge/submit settles the duel and reveals both times
   const entry = await fetch(`${baseUrl}/api/entries?exclude=nobody`)
   const entryBody = (await entry.json()) as { entries: unknown[] }
   assert.equal(entryBody.entries.length, 0, 'a settled entry must no longer appear as open')
+})
+
+function slowEvents(): { key: string, tRelativeMs: number, resultingLength: number }[] {
+  // Slower than the creator's seeded 5000ms run — the challenger loses.
+  return TARGET.split('').map((char, i) => ({ key: char, tRelativeMs: i * 800, resultingLength: i + 1 }))
+}
+
+function fastEvents(): { key: string, tRelativeMs: number, resultingLength: number }[] {
+  return TARGET.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+}
+
+test('POST /api/entries/challenge/submit returns a pending decision on a loss when the entry allows a rematch, with no duration anywhere', async () => {
+  getDb().prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await fetch(`${baseUrl}/api/entries/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'double-trial-tx' }),
+  })
+
+  const res = await fetch(`${baseUrl}/api/entries/challenge/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEvents() }),
+  })
+  const text = await res.text()
+  assert.equal(res.status, 201)
+  assert.ok(!/duration/i.test(text), `pending response leaked timing info: ${text}`)
+  const body = JSON.parse(text) as { ok: boolean, pending: boolean, retryStakeLuna: number, retryDeadline: string }
+  assert.equal(body.pending, true)
+  assert.equal(body.retryStakeLuna, STAKE_LUNA * 2)
+  assert.ok(body.retryDeadline)
+})
+
+test('the full double-trial flow: lose, retry, win — settles at the 4x pot', async () => {
+  getDb().prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await fetch(`${baseUrl}/api/entries/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'flow-first-tx' }),
+  })
+  await fetch(`${baseUrl}/api/entries/challenge/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEvents() }),
+  })
+
+  const stakeRes = await fetch(`${baseUrl}/api/entries/challenge/retry/stake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'flow-retry-tx' }),
+  })
+  assert.equal(stakeRes.status, 200)
+
+  const submitRes = await fetch(`${baseUrl}/api/entries/challenge/retry/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'flow-retry-tx', events: fastEvents() }),
+  })
+  assert.equal(submitRes.status, 201)
+  const body = (await submitRes.json()) as { pending: boolean, outcome: string, txHashes: string[] }
+  assert.equal(body.pending, false)
+  assert.equal(body.outcome, 'challenger')
+
+  const winnerId = getOrCreateUser(getDb(), CHALLENGER_ADDRESS)
+  const payoutRow = getDb().prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(winnerId) as { amount_luna: number }
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 4 * 0.9))
+})
+
+test('declining the retry settles immediately at the original 2x pot', async () => {
+  getDb().prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await fetch(`${baseUrl}/api/entries/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'decline-first-tx' }),
+  })
+  await fetch(`${baseUrl}/api/entries/challenge/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEvents() }),
+  })
+
+  const res = await fetch(`${baseUrl}/api/entries/challenge/decline-retry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entryId, nimAddress: CHALLENGER_ADDRESS }),
+  })
+  assert.equal(res.status, 201)
+  const body = (await res.json()) as { pending: boolean, outcome: string }
+  assert.equal(body.pending, false)
+  assert.equal(body.outcome, 'creator')
+
+  const creatorId = getOrCreateUser(getDb(), CREATOR_ADDRESS)
+  const payoutRow = getDb().prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId) as { amount_luna: number }
+  assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9))
 })
 
 test('POST /api/entries/challenge/submit rejects submitting to an unchallenged entry', async () => {

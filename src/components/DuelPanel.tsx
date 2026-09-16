@@ -15,12 +15,13 @@ type Stage =
   | { name: 'revealing', difficulty: Difficulty, stakeTxHash: string }
   | { name: 'typing', difficulty: Difficulty, stakeTxHash: string, paragraph: string }
   | { name: 'submitting', difficulty: Difficulty, stakeTxHash: string }
-  | { name: 'waiting', entryId: string, expiresAt: string, visibility: Visibility }
+  | { name: 'waiting', entryId: string, expiresAt: string, visibility: Visibility, allowRematch: boolean }
   | { name: 'error', message: string, difficulty: Difficulty, stakeTxHash: string | null }
 
 export function DuelPanel({ address, sendPayment }: Props) {
   const [stage, setStage] = useState<Stage>({ name: 'picking' })
   const [visibility, setVisibility] = useState<Visibility>('PUBLIC')
+  const [allowRematch, setAllowRematch] = useState(false)
   const [houseInfo, setHouseInfo] = useState<HouseAddressInfo | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
 
@@ -65,11 +66,17 @@ export function DuelPanel({ address, sendPayment }: Props) {
       const res = await fetch('/api/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events, visibility }),
+        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events, visibility, allowRematch }),
       })
       const body = await readJsonOrThrow(res, 'Could not submit your run')
       setCopyStatus('idle')
-      setStage({ name: 'waiting', entryId: body.entryId as string, expiresAt: body.expiresAt as string, visibility: body.visibility as Visibility })
+      setStage({
+        name: 'waiting',
+        entryId: body.entryId as string,
+        expiresAt: body.expiresAt as string,
+        visibility: body.visibility as Visibility,
+        allowRematch: body.allowRematch as boolean,
+      })
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error), difficulty, stakeTxHash })
@@ -114,6 +121,10 @@ export function DuelPanel({ address, sendPayment }: Props) {
             Private — invite by link
           </button>
         </div>
+        <label className="rematch-toggle">
+          <input type="checkbox" checked={allowRematch} onChange={(e) => setAllowRematch(e.target.checked)} />
+          Allow double trial — if the challenger loses, they get one retry at double the stake before it's final
+        </label>
         <div className="difficulty-picker">
           {DIFFICULTIES.map((d) => (
             <button
@@ -165,6 +176,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
             It's hidden from the open-duels dashboard; only whoever taps this link can find and challenge it.
             Your time is hidden from everyone, including you, until they finish. Refunded automatically if
             nobody challenges within 24 hours (by {new Date(stage.expiresAt).toLocaleString()}).
+            {stage.allowRematch && ' Double trial is on — if whoever challenges this loses, they get one retry at double the stake before it settles.'}
           </p>
           <input className="share-link-input" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
           <button type="button" className="btn btn-primary" onClick={() => void copyDeepLink(stage.entryId)}>
@@ -182,6 +194,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
         <p className="section-note">
           Your time is hidden from everyone, including you, until someone takes the bet. Refunded
           automatically if nobody challenges within 24 hours (by {new Date(stage.expiresAt).toLocaleString()}).
+          {stage.allowRematch && ' Double trial is on — if whoever challenges this loses, they get one retry at double the stake before it settles.'}
         </p>
       </div>
     )

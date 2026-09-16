@@ -1,7 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite'
+import type { EntryRow } from '../db/types.ts'
 import type { HouseWallet } from '../../services/escrow.ts'
 import { refund } from '../../services/escrow.ts'
 import { getUserAddress } from '../db/users.ts'
+import { settleAbandonedRetry } from './service.ts'
 import { applyDuelEvent, settlementObligations } from './stateMachine.ts'
 import type { LockedDuel, OpenDuel } from './stateMachine.ts'
 
@@ -10,7 +12,9 @@ export interface ExpirySweepResult {
   releasedLocks: string[]
   /** Entry ids refunded because nobody ever challenged within 24h. */
   refundedEntries: string[]
-  /** Entries whose refund failed this run — claim was reverted so the next sweep retries. */
+  /** Entry ids settled as a loss because their double-trial retry window passed with nobody deciding. */
+  settledAbandonedRetries: string[]
+  /** Entries whose refund/settlement failed this run — claim was reverted (where applicable) so the next sweep retries. */
   errors: { entryId: string, reason: string }[]
 }
 
@@ -29,6 +33,12 @@ interface OpenEntryRow {
   creator_user_id: string
   stake_luna: number
   expires_at: string
+}
+
+interface AbandonedRetryRow {
+  entry_id: string
+  duel_id: string
+  challenger_user_id: string
 }
 
 /**
@@ -54,7 +64,7 @@ interface OpenEntryRow {
 export async function runExpirySweep(db: DatabaseSync, wallet: HouseWallet, now: Date = new Date()): Promise<ExpirySweepResult> {
   const nowIso = now.toISOString()
   const nowMs = now.getTime()
-  const result: ExpirySweepResult = { releasedLocks: [], refundedEntries: [], errors: [] }
+  const result: ExpirySweepResult = { releasedLocks: [], refundedEntries: [], settledAbandonedRetries: [], errors: [] }
 
   const staleLocks = db
     .prepare(
@@ -118,6 +128,32 @@ export async function runExpirySweep(db: DatabaseSync, wallet: HouseWallet, now:
     }
     catch (error) {
       db.prepare("UPDATE entries SET status = 'OPEN' WHERE id = ?").run(row.entry_id)
+      result.errors.push({ entryId: row.entry_id, reason: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  // Double trial: a losing first attempt whose retry window passed with
+  // nobody ever deciding — "he logs off" — settles as a loss, same as an
+  // explicit decline. The `retry_keystroke_run_id IS NULL` guard is the
+  // claim: it's also how `retrySubmit`/`declineRetry` recognize a duel as
+  // still theirs to settle, so once any of the three sets it (or
+  // `settled_at`), the others no longer match this query.
+  const abandonedRetries = db
+    .prepare(
+      `SELECT d.entry_id as entry_id, d.id as duel_id, d.challenger_user_id
+       FROM duels d
+       WHERE d.retry_offer_expires_at IS NOT NULL AND d.retry_offer_expires_at <= ?
+         AND d.settled_at IS NULL AND d.retry_keystroke_run_id IS NULL`,
+    )
+    .all(nowIso) as unknown as AbandonedRetryRow[]
+
+  for (const row of abandonedRetries) {
+    try {
+      const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(row.entry_id) as unknown as EntryRow
+      await settleAbandonedRetry(db, wallet, { duelId: row.duel_id, entry, challengerUserId: row.challenger_user_id })
+      result.settledAbandonedRetries.push(row.entry_id)
+    }
+    catch (error) {
       result.errors.push({ entryId: row.entry_id, reason: error instanceof Error ? error.message : String(error) })
     }
   }

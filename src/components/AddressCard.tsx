@@ -1,3 +1,5 @@
+import { Identicon } from './Identicon'
+
 interface Props {
   address: string | null
   isLoading: boolean
@@ -9,6 +11,7 @@ export function AddressCard({ address, isLoading, error, onConnect }: Props) {
   if (address) {
     return (
       <div className="address-card">
+        <Identicon address={address} size={56} />
         <span className="address-card-label">Your NIM address</span>
         <span className="address-card-value">{address}</span>
       </div>

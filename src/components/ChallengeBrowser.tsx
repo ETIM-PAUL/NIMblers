@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
 import type { Difficulty } from '../lib/api'
 import { DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatAge, formatLuna, readJsonOrThrow } from '../lib/api'
+import { Identicon } from './Identicon'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -31,11 +32,11 @@ type Stage =
   | { name: 'browsing' }
   | { name: 'loading-invite' }
   | { name: 'invite', entry: OpenEntry }
-  | { name: 'staking', entryId: string }
-  | { name: 'challenging', entryId: string, stakeTxHash: string }
-  | { name: 'typing', entryId: string, paragraph: string }
-  | { name: 'submitting', entryId: string }
-  | { name: 'submitted', reveal: Reveal }
+  | { name: 'staking', entryId: string, creatorAddress: string }
+  | { name: 'challenging', entryId: string, creatorAddress: string, stakeTxHash: string }
+  | { name: 'typing', entryId: string, creatorAddress: string, paragraph: string }
+  | { name: 'submitting', entryId: string, creatorAddress: string }
+  | { name: 'submitted', reveal: Reveal, creatorAddress: string }
   | { name: 'error', message: string }
 
 function formatSeconds(ms: number): string {
@@ -79,8 +80,8 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
     }
   }, [presetEntryId, address])
 
-  async function challenge(entryId: string, stakeTxHash: string) {
-    setStage({ name: 'challenging', entryId, stakeTxHash })
+  async function challenge(entryId: string, creatorAddress: string, stakeTxHash: string) {
+    setStage({ name: 'challenging', entryId, creatorAddress, stakeTxHash })
     try {
       const res = await fetch('/api/entries/challenge', {
         method: 'POST',
@@ -88,27 +89,27 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         body: JSON.stringify({ entryId, nimAddress: address, stakeTxHash }),
       })
       const body = await readJsonOrThrow(res, 'Could not take this bet')
-      setStage({ name: 'typing', entryId, paragraph: body.paragraphBody as string })
+      setStage({ name: 'typing', entryId, creatorAddress, paragraph: body.paragraphBody as string })
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error) })
     }
   }
 
-  async function handleChallenge(entryId: string, stakeLuna: number) {
-    setStage({ name: 'staking', entryId })
+  async function handleChallenge(entryId: string, stakeLuna: number, creatorAddress: string) {
+    setStage({ name: 'staking', entryId, creatorAddress })
     try {
       const house = await fetchHouseAddress()
       const stakeTxHash = await sendPayment(house.address, stakeLuna)
-      await challenge(entryId, stakeTxHash)
+      await challenge(entryId, creatorAddress, stakeTxHash)
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error) })
     }
   }
 
-  async function handleSubmitRun(entryId: string, run: KeystrokeRun) {
-    setStage({ name: 'submitting', entryId })
+  async function handleSubmitRun(entryId: string, creatorAddress: string, run: KeystrokeRun) {
+    setStage({ name: 'submitting', entryId, creatorAddress })
     try {
       const res = await fetch('/api/entries/challenge/submit', {
         method: 'POST',
@@ -116,7 +117,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         body: JSON.stringify({ entryId, nimAddress: address, events: run.events }),
       })
       const body = await readJsonOrThrow(res, 'Could not submit your run')
-      setStage({ name: 'submitted', reveal: body as unknown as Reveal })
+      setStage({ name: 'submitted', reveal: body as unknown as Reveal, creatorAddress })
     }
     catch (error) {
       setStage({ name: 'error', message: errorMessage(error) })
@@ -133,6 +134,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
           <ul className="entry-list">
             {entries.map((entry) => (
               <li key={entry.entryId} className="entry-list-item">
+                <Identicon address={entry.creatorAddress} size={36} />
                 <div className="entry-list-info">
                   <span className="entry-list-address">{entry.creatorAddress}</span>
                   <span className="entry-list-meta">
@@ -142,7 +144,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna)}
+                  onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna, entry.creatorAddress)}
                 >
                   Challenge
                 </button>
@@ -168,6 +170,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         <p className="section-note-best">You've been challenged to a duel.</p>
         <ul className="entry-list">
           <li className="entry-list-item">
+            <Identicon address={entry.creatorAddress} size={36} />
             <div className="entry-list-info">
               <span className="entry-list-address">{entry.creatorAddress}</span>
               <span className="entry-list-meta">
@@ -177,7 +180,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna)}
+              onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna, entry.creatorAddress)}
             >
               Challenge
             </button>
@@ -204,7 +207,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         </p>
         <TypingEngine
           paragraph={stage.paragraph}
-          onSubmit={(run) => void handleSubmitRun(stage.entryId, run)}
+          onSubmit={(run) => void handleSubmitRun(stage.entryId, stage.creatorAddress, run)}
         />
       </>
     )
@@ -215,7 +218,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   }
 
   if (stage.name === 'submitted') {
-    const { reveal } = stage
+    const { reveal, creatorAddress } = stage
     const youWon = reveal.outcome === 'challenger'
     const headline = reveal.outcome === 'tie'
       ? "It's a tie — both stakes refunded in full."
@@ -227,11 +230,11 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         <p className={reveal.outcome === 'challenger' ? 'section-note-best' : 'section-note'}>{headline}</p>
         <div className="reveal-card">
           <div className="reveal-row">
-            <span>Opponent</span>
+            <span className="reveal-who"><Identicon address={creatorAddress} size={24} /> Opponent</span>
             <span>{formatSeconds(reveal.creatorDurationMs)}</span>
           </div>
           <div className="reveal-row">
-            <span>You</span>
+            <span className="reveal-who"><Identicon address={address} size={24} /> You</span>
             <span>{formatSeconds(reveal.challengerDurationMs)}</span>
           </div>
           <div className="reveal-row">

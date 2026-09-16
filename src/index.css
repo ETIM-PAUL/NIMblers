@@ -146,6 +146,14 @@ button {
   color: var(--danger);
 }
 
+/* Identicon */
+
+.identicon {
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--neutral-bg);
+}
+
 /* Address card */
 
 .address-card {
@@ -357,7 +365,14 @@ button {
 .reveal-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 14px;
+}
+
+.reveal-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .reveal-row span:first-child {

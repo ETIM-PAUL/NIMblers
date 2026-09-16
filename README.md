@@ -107,6 +107,13 @@ so there's nothing to fake.
 
 - **Frontend:** Vite + React + TypeScript, talking to Nimiq Pay through
   `@nimiq/mini-app-sdk`
+- **Identicons:** every address anywhere in the app — the open-duels
+  dashboard, a duel invite, the settlement reveal, the leaderboard, your own
+  connected address — renders through `@nimiq/identicons`, the same
+  official library Nimiq's own wallet uses. It hashes the address string
+  itself, so a given address always produces the exact avatar the rest of
+  the Nimiq ecosystem already shows for it — nothing here invents its own
+  avatar scheme that would look out of place next to a real Nimiq wallet.
 - **API:** Node's built-in `http` module — no routing framework dependency for
   the handful of routes there are so far
 - **Data:** SQLite via Node's built-in `node:sqlite` — the entire data layer

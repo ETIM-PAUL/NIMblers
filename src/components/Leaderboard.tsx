@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { errorMessage, formatLuna, readJsonOrThrow } from '../lib/api'
+import { Identicon } from './Identicon'
 
 interface LeaderboardEntry {
   rank: number
@@ -36,6 +37,7 @@ export function Leaderboard() {
       {entries.map((entry) => (
         <li key={entry.nimAddress} className="leaderboard-row">
           <span className="leaderboard-rank">#{entry.rank}</span>
+          <Identicon address={entry.nimAddress} size={28} />
           <span className="leaderboard-address">{entry.nimAddress}</span>
           <span className="leaderboard-stats">
             <span className="leaderboard-winnings">{formatLuna(entry.totalWonLuna)}</span>

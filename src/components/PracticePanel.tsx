@@ -72,9 +72,7 @@ export function PracticePanel() {
   if (result !== null) {
     return (
       <>
-        <p className="section-note">
-          Matched in {formatMs(result.durationMs)} on {DIFFICULTY_LABELS[difficulty]}. (Nothing is saved yet.)
-        </p>
+        <p className="section-note">{formatMs(result.durationMs)} — {DIFFICULTY_LABELS[difficulty]}</p>
         <p className={result.isNewBest ? 'section-note section-note-best' : 'section-note'}>
           {result.isNewBest ? 'New personal best!' : `Personal best: ${formatMs(result.best)}`}
         </p>

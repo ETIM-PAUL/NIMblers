@@ -64,14 +64,14 @@ function App() {
           <h2 className="section-title">Duel</h2>
           {address
             ? <DuelPanel address={address} sendPayment={sendPayment} />
-            : <p className="section-note">Show your address above to stake and start a duel.</p>}
+            : <p className="section-note">Show your address to start a duel.</p>}
         </section>
 
         <section className="section">
           <h2 className="section-title">{presetEntryId ? 'Duel invite' : 'Open duels'}</h2>
           {address
             ? <ChallengeBrowser address={address} sendPayment={sendPayment} presetEntryId={presetEntryId} />
-            : <p className="section-note">Show your address above to {presetEntryId ? 'see this duel' : 'browse and take a bet'}.</p>}
+            : <p className="section-note">Show your address to {presetEntryId ? 'see this duel' : 'browse duels'}.</p>}
         </section>
 
         <section className="section">

@@ -97,14 +97,8 @@ export function DuelPanel({ address, sendPayment }: Props) {
   if (stage.name === 'picking') {
     return (
       <div className="duel-panel">
-        <p className="section-note">
-          Stake NIM, type today's paragraph for that level, and wait for someone to take the bet.
-          Your time stays hidden until they finish theirs.
-        </p>
-        <p className="duel-warning">
-          Once you stake, closing this tab before you finish typing forfeits the stake — it is not
-          automatically refunded. Only a fully OPEN entry that nobody challenges within 24h gets refunded.
-        </p>
+        <p className="section-note">Stake NIM, type the paragraph, wait for a challenger.</p>
+        <p className="duel-warning">Closing this tab before you finish forfeits your stake.</p>
         <div className="visibility-picker">
           <button
             type="button"
@@ -123,7 +117,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
         </div>
         <label className="rematch-toggle">
           <input type="checkbox" checked={allowRematch} onChange={(e) => setAllowRematch(e.target.checked)} />
-          Allow double trial — if the challenger loses, they get one retry at double the stake before it's final
+          Allow double trial (loser can retry for 2x)
         </label>
         <div className="difficulty-picker">
           {DIFFICULTIES.map((d) => (
@@ -153,7 +147,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
   if (stage.name === 'typing') {
     return (
       <>
-        <p className="duel-warning">Closing this tab now forfeits your stake — finish typing to lock in your entry.</p>
+        <p className="duel-warning">Closing this tab now forfeits your stake.</p>
         <TypingEngine
           paragraph={stage.paragraph}
           onSubmit={(run) => void handleSubmitRun(stage.difficulty, stage.stakeTxHash, run)}
@@ -171,31 +165,22 @@ export function DuelPanel({ address, sendPayment }: Props) {
       const link = buildDuelDeepLink(stage.entryId)
       return (
         <div className="duel-panel">
-          <p className="section-note-best">Private entry created — share this link to invite someone.</p>
-          <p className="section-note">
-            It's hidden from the open-duels dashboard; only whoever taps this link can find and challenge it.
-            Your time is hidden from everyone, including you, until they finish. Refunded automatically if
-            nobody challenges within 24 hours (by {new Date(stage.expiresAt).toLocaleString()}).
-            {stage.allowRematch && ' Double trial is on — if whoever challenges this loses, they get one retry at double the stake before it settles.'}
-          </p>
+          <p className="section-note-best">Private entry created.</p>
+          <p className="section-note">Refunded in 24h if unclaimed.{stage.allowRematch && ' Double trial is on.'}</p>
           <input className="share-link-input" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
           <button type="button" className="btn btn-primary" onClick={() => void copyDeepLink(stage.entryId)}>
             {copyStatus === 'copied' ? 'Copied!' : 'Copy link'}
           </button>
           {copyStatus === 'failed' && (
-            <p className="address-card-error">Couldn't copy automatically — select the link above and copy it manually.</p>
+            <p className="address-card-error">Couldn't copy — select it manually.</p>
           )}
         </div>
       )
     }
     return (
       <div className="duel-panel">
-        <p className="section-note-best">Entry created — waiting for a challenger.</p>
-        <p className="section-note">
-          Your time is hidden from everyone, including you, until someone takes the bet. Refunded
-          automatically if nobody challenges within 24 hours (by {new Date(stage.expiresAt).toLocaleString()}).
-          {stage.allowRematch && ' Double trial is on — if whoever challenges this loses, they get one retry at double the stake before it settles.'}
-        </p>
+        <p className="section-note-best">Waiting for a challenger.</p>
+        <p className="section-note">Refunded in 24h if unclaimed.{stage.allowRematch && ' Double trial is on.'}</p>
       </div>
     )
   }

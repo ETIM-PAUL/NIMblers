@@ -276,10 +276,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   if (stage.name === 'typing') {
     return (
       <>
-        <p className="duel-warning">
-          Closing this tab now forfeits your stake — finish typing to lock in your run. Your opponent's
-          time stays hidden from you the whole time.
-        </p>
+        <p className="duel-warning">Closing this tab now forfeits your stake.</p>
         <TypingEngine
           paragraph={stage.paragraph}
           onSubmit={(run) => void handleSubmitRun(stage.entryId, stage.creatorAddress, stage.paragraph, run)}
@@ -296,11 +293,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
     const { entryId, creatorAddress, paragraph, retryDeadline, retryStakeLuna } = stage
     return (
       <div className="duel-panel">
-        <p className="section-note">
-          You didn't beat it. Your opponent's time stays hidden either way — take the loss now, or stake
-          double and try again. Decide by {new Date(retryDeadline).toLocaleTimeString()}, or this settles as a
-          loss automatically.
-        </p>
+        <p className="section-note">You didn't beat it. Retry or take the loss by {new Date(retryDeadline).toLocaleTimeString()}.</p>
         <button type="button" className="btn btn-rematch" onClick={() => void handleRetry(entryId, creatorAddress, paragraph, retryStakeLuna)}>
           Retry — stake {formatLuna(retryStakeLuna)}, double or nothing
         </button>
@@ -318,7 +311,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   if (stage.name === 'retry-typing') {
     return (
       <>
-        <p className="duel-warning">This is the final attempt — win or lose, it settles the duel.</p>
+        <p className="duel-warning">Final attempt — settles the duel either way.</p>
         <TypingEngine
           paragraph={stage.paragraph}
           onSubmit={(run) => void handleRetrySubmit(stage.entryId, stage.creatorAddress, stage.stakeTxHash, run)}

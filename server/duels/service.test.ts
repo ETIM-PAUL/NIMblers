@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { challengeEntry, declineRetry, getEntryForChallenge, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
+import { challengeEntry, declineRetry, getEntryForChallenge, listMyDuelHistory, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -675,4 +675,97 @@ test('submitChallenge is idempotent — calling it twice records the run once an
 
   const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'").get() as { c: number }
   assert.equal(payoutCount.c, 1, 'a retry must not pay out twice')
+})
+
+// --- History ---
+
+test('listMyDuelHistory shows a win from the creator\'s side and a loss from the challenger\'s side, with both durations', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const creatorHistory = listMyDuelHistory(db, CREATOR_ADDRESS)
+  assert.equal(creatorHistory.length, 1)
+  assert.equal(creatorHistory[0].outcome, 'won')
+  assert.equal(creatorHistory[0].opponentAddress, CHALLENGER_ADDRESS)
+  assert.equal(creatorHistory[0].myDurationMs, 5000)
+  assert.equal(creatorHistory[0].difficulty, 'easy')
+  assert.equal(creatorHistory[0].stakeLuna, STAKE_LUNA)
+  assert.ok(creatorHistory[0].deltaMs > 0)
+
+  const challengerHistory = listMyDuelHistory(db, CHALLENGER_ADDRESS)
+  assert.equal(challengerHistory.length, 1)
+  assert.equal(challengerHistory[0].outcome, 'lost')
+  assert.equal(challengerHistory[0].opponentAddress, CREATOR_ADDRESS)
+  assert.equal(challengerHistory[0].deltaMs, creatorHistory[0].deltaMs, 'both sides must agree on the delta')
+})
+
+test('listMyDuelHistory reports a tie for both players, with a zero delta', async () => {
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  const tieEvents = honestEventsFor(TARGET)
+  tieEvents[tieEvents.length - 1] = { ...tieEvents[tieEvents.length - 1], tRelativeMs: 5000 }
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: tieEvents })
+
+  assert.equal(listMyDuelHistory(db, CREATOR_ADDRESS)[0].outcome, 'tied')
+  assert.equal(listMyDuelHistory(db, CHALLENGER_ADDRESS)[0].outcome, 'tied')
+  assert.equal(listMyDuelHistory(db, CREATOR_ADDRESS)[0].deltaMs, 0)
+})
+
+test('listMyDuelHistory excludes duels that are not yet settled', async () => {
+  const wallet = fakeWallet()
+  await lockEntryForChallenger(db, wallet) // LOCKED, never submitted
+  assert.deepEqual(listMyDuelHistory(db, CREATOR_ADDRESS), [])
+  assert.deepEqual(listMyDuelHistory(db, CHALLENGER_ADDRESS), [])
+})
+
+test('listMyDuelHistory uses the retry\'s duration, not the original losing attempt, once a double trial is decided', async () => {
+  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const wallet = fakeSettlingWallet()
+  await lockEntryForChallenger(db, wallet)
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const retryWallet = walletForRetryStake(wallet, STAKE_LUNA * 2)
+  const retryEvents = honestEventsFor(TARGET)
+  await retrySubmit(db, retryWallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'retry-history-tx', events: retryEvents })
+
+  const history = listMyDuelHistory(db, CHALLENGER_ADDRESS)
+  assert.equal(history.length, 1, 'the original losing attempt and the retry are one settled duel, not two')
+  assert.equal(history[0].outcome, 'won')
+  assert.equal(history[0].myDurationMs, retryEvents[retryEvents.length - 1].tRelativeMs, 'must reflect the retry run, not the original slow one')
+})
+
+test('listMyDuelHistory sorts newest-decided first', async () => {
+  // A second, separately-created and separately-settled entry.
+  const secondEntryId = randomUUID()
+  const secondRunId = randomUUID()
+  const now = new Date().toISOString()
+  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  db.prepare(
+    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(secondRunId, creatorId, PARAGRAPH_ID, '[]', 5000, now)
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString()
+  db.prepare(
+    `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
+     VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
+  ).run(secondEntryId, creatorId, PARAGRAPH_ID, secondRunId, STAKE_LUNA, now, expiresAt, 'second-entry-stake-tx')
+
+  const wallet = fakeSettlingWallet()
+  await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'first-settle-tx' })
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
+
+  await challengeEntry(db, wallet, { entryId: secondEntryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'second-settle-tx' })
+  await submitChallenge(db, wallet, { entryId: secondEntryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
+
+  // Both settlements can land within the same millisecond in a fast
+  // in-memory test (never happens for real — a settlement involves an
+  // actual chain call) — pin distinct timestamps directly so the ordering
+  // assertion below is about the sort, not test-environment clock timing.
+  db.prepare("UPDATE duels SET settled_at = '2026-01-01T00:00:00.000Z' WHERE entry_id = ?").run(entryId)
+  db.prepare("UPDATE duels SET settled_at = '2026-01-01T00:00:01.000Z' WHERE entry_id = ?").run(secondEntryId)
+
+  const history = listMyDuelHistory(db, CREATOR_ADDRESS)
+  assert.equal(history.length, 2)
+  assert.equal(history[0].entryId, secondEntryId, 'the more recently settled duel should come first')
+  assert.equal(history[1].entryId, entryId)
 })

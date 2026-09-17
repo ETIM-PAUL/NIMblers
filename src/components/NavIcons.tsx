@@ -44,6 +44,17 @@ export function BoardIcon() {
   )
 }
 
+/** A clock face with hands pointing back — the History tab. */
+export function HistoryIcon() {
+  return (
+    <IconBase>
+      <path d="M4 9a8 8 0 1 1 1.5 7" />
+      <path d="M4 4v5h5" />
+      <path d="M12 8v5l3 2" />
+    </IconBase>
+  )
+}
+
 /** The app-bar's logo mark — a filled version of DuelIcon's bolt, in a gradient badge. */
 export function AppLogo() {
   return (

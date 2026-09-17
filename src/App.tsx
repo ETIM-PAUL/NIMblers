@@ -2,20 +2,22 @@ import { useState } from 'react'
 import { AddressCard } from './components/AddressCard'
 import { ChallengeBrowser } from './components/ChallengeBrowser'
 import { ConnectionBanner } from './components/ConnectionBanner'
+import { DuelHistory } from './components/DuelHistory'
 import { DuelPanel } from './components/DuelPanel'
 import { Leaderboard } from './components/Leaderboard'
-import { AppLogo, BoardIcon, DuelIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
+import { AppLogo, BoardIcon, DuelIcon, HistoryIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
 import { PracticePanel } from './components/PracticePanel'
 import { DUEL_QUERY_PARAM } from './lib/duelLink'
 import { useNimiq } from './lib/useNimiq'
 
-const TABS = ['duel', 'open', 'practice', 'leaderboard'] as const
+const TABS = ['duel', 'open', 'history', 'practice', 'leaderboard'] as const
 type Tab = typeof TABS[number]
 
 const TAB_ICONS: Record<Tab, React.ReactNode> = {
   duel: <DuelIcon />,
   open: <OpenIcon />,
+  history: <HistoryIcon />,
   practice: <PracticeIcon />,
   leaderboard: <BoardIcon />,
 }
@@ -38,7 +40,13 @@ function App() {
   // Read once — the param that opened this session doesn't change later.
   const [presetEntryId] = useState(() => new URLSearchParams(window.location.search).get(DUEL_QUERY_PARAM) ?? undefined)
   const [activeTab, setActiveTab] = useState<Tab>(presetEntryId ? 'open' : 'duel')
-  const tabLabels: Record<Tab, string> = { duel: 'Duel', open: presetEntryId ? 'Invite' : 'Open', practice: 'Practice', leaderboard: 'Board' }
+  const tabLabels: Record<Tab, string> = {
+    duel: 'Duel',
+    open: presetEntryId ? 'Invite' : 'Open',
+    history: 'History',
+    practice: 'Practice',
+    leaderboard: 'Board',
+  }
 
   if (isConnecting) {
     return (
@@ -84,6 +92,12 @@ function App() {
           {address
             ? <ChallengeBrowser address={address} sendPayment={sendPayment} presetEntryId={presetEntryId} />
             : <p className="section-note">Connect your wallet to {presetEntryId ? 'see this duel' : 'browse duels'}.</p>}
+        </section>
+
+        <section className="section" hidden={activeTab !== 'history'}>
+          {address
+            ? <DuelHistory address={address} />
+            : <p className="section-note">Connect your wallet to see your duel history.</p>}
         </section>
 
         <section className="section" hidden={activeTab !== 'practice'}>

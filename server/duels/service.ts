@@ -124,6 +124,93 @@ export function listMyEntries(db: DatabaseSync, nimAddress: string): MyEntrySumm
   }))
 }
 
+export interface DuelHistoryEntry {
+  entryId: string
+  difficulty: Difficulty
+  stakeLuna: number
+  /** When the duel was decided — not when it was created/challenged. */
+  settledAt: string
+  opponentAddress: string
+  outcome: 'won' | 'lost' | 'tied'
+  myDurationMs: number
+  opponentDurationMs: number
+  deltaMs: number
+}
+
+interface HistoryRow {
+  entry_id: string
+  difficulty: Difficulty
+  stake_luna: number
+  settled_at: string
+  opponent_address: string
+  my_user_id: string
+  winner_user_id: string | null
+  my_duration_ms: number
+  opponent_duration_ms: number
+}
+
+function toHistoryEntry(row: HistoryRow): DuelHistoryEntry {
+  return {
+    entryId: row.entry_id,
+    difficulty: row.difficulty,
+    stakeLuna: row.stake_luna,
+    settledAt: row.settled_at,
+    opponentAddress: row.opponent_address,
+    outcome: row.winner_user_id === null ? 'tied' : row.winner_user_id === row.my_user_id ? 'won' : 'lost',
+    myDurationMs: row.my_duration_ms,
+    opponentDurationMs: row.opponent_duration_ms,
+    deltaMs: Math.abs(row.my_duration_ms - row.opponent_duration_ms),
+  }
+}
+
+/**
+ * Every duel this address has actually finished — as creator or as
+ * challenger, whichever role they played — newest-decided first. Only
+ * SETTLED duels: an EXPIRED entry (nobody ever challenged it, refunded)
+ * or a still-LOCKED one never produced a winner or a time to compare, so
+ * there's nothing meaningful to show here for those. A double-trial retry
+ * is already folded in: `winner_user_id`/the challenger's final run are
+ * only ever set once, by whichever attempt actually decided the duel (see
+ * `finalChallengerRunId`), so this needs no special-casing for it.
+ */
+export function listMyDuelHistory(db: DatabaseSync, nimAddress: string): DuelHistoryEntry[] {
+  const asCreator = db
+    .prepare(
+      `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
+              cu.nim_address as opponent_address, e.creator_user_id as my_user_id, d.winner_user_id,
+              mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms
+       FROM entries e
+       JOIN duels d ON d.entry_id = e.id
+       JOIN paragraphs p ON p.id = e.paragraph_id
+       JOIN users u ON u.id = e.creator_user_id
+       JOIN users cu ON cu.id = d.challenger_user_id
+       JOIN keystroke_runs mine ON mine.id = e.keystroke_run_id
+       JOIN keystroke_runs opp ON opp.id = COALESCE(d.retry_keystroke_run_id, d.challenger_keystroke_run_id)
+       WHERE u.nim_address = ? AND e.status = 'SETTLED'`,
+    )
+    .all(nimAddress) as unknown as HistoryRow[]
+
+  const asChallenger = db
+    .prepare(
+      `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
+              creator_u.nim_address as opponent_address, d.challenger_user_id as my_user_id, d.winner_user_id,
+              mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms
+       FROM entries e
+       JOIN duels d ON d.entry_id = e.id
+       JOIN paragraphs p ON p.id = e.paragraph_id
+       JOIN users creator_u ON creator_u.id = e.creator_user_id
+       JOIN users u ON u.id = d.challenger_user_id
+       JOIN keystroke_runs opp ON opp.id = e.keystroke_run_id
+       JOIN keystroke_runs mine ON mine.id = COALESCE(d.retry_keystroke_run_id, d.challenger_keystroke_run_id)
+       WHERE u.nim_address = ? AND e.status = 'SETTLED'`,
+    )
+    .all(nimAddress) as unknown as HistoryRow[]
+
+  return [...asCreator, ...asChallenger]
+    .map(toHistoryEntry)
+    .sort((a, b) => (a.settledAt < b.settledAt ? 1 : a.settledAt > b.settledAt ? -1 : 0))
+}
+
 export type EntryLookupResult =
   | { ok: true, entry: OpenEntrySummary & { visibility: EntryVisibility } }
   | { ok: false, reason: string }

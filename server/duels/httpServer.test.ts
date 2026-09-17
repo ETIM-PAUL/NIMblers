@@ -220,6 +220,21 @@ test('POST /api/entries/challenge/submit settles the duel and reveals both times
   const entry = await fetch(`${baseUrl}/api/entries?exclude=nobody`)
   const entryBody = (await entry.json()) as { entries: unknown[] }
   assert.equal(entryBody.entries.length, 0, 'a settled entry must no longer appear as open')
+
+  // The challenger typed much faster than the creator's seeded 5000ms run,
+  // so from the creator's own side of this same duel, they lost.
+  const historyRes = await fetch(`${baseUrl}/api/duels/history?nimAddress=${encodeURIComponent(CREATOR_ADDRESS)}`)
+  assert.equal(historyRes.status, 200)
+  const historyBody = (await historyRes.json()) as { history: { outcome: string, deltaMs: number, myDurationMs: number }[] }
+  assert.equal(historyBody.history.length, 1)
+  assert.equal(historyBody.history[0].outcome, 'lost')
+  assert.equal(historyBody.history[0].myDurationMs, 5000)
+  assert.equal(historyBody.history[0].deltaMs, 4300)
+})
+
+test('GET /api/duels/history 400s without a nimAddress', async () => {
+  const res = await fetch(`${baseUrl}/api/duels/history`)
+  assert.equal(res.status, 400)
 })
 
 function slowEvents(): { key: string, tRelativeMs: number, resultingLength: number }[] {

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
 import type { Difficulty, MyEntry } from '../lib/api'
-import { buildDuelDeepLink, errorMessage, fetchHouseAddress, fetchMyEntries, formatAge, formatLuna, readJsonOrThrow } from '../lib/api'
+import { buildDuelDeepLink, errorMessage, fetchHouseAddress, fetchMyEntries, formatAge, formatLuna, formatSeconds, readJsonOrThrow } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { parseDuelEntryId } from '../lib/duelLink'
+import { buildExplorerTxLink } from '../lib/explorer'
 import { DifficultyChip } from './DifficultyChip'
 import { EmptyState } from './EmptyState'
 import { Identicon } from './Identicon'
@@ -52,10 +53,6 @@ type Stage =
   | { name: 'declining', entryId: string, creatorAddress: string }
   | { name: 'settled', reveal: SettledReveal, creatorAddress: string }
   | { name: 'error', message: string }
-
-function formatSeconds(ms: number): string {
-  return `${(ms / 1000).toFixed(2)}s`
-}
 
 /** The creator's-eye view of one of their own entries — a status pill's text and color modifier. */
 function myEntryStatus(entry: MyEntry): { label: string, modifier: string } {
@@ -500,7 +497,9 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
           </div>
         </div>
         {reveal.txHashes.map((hash) => (
-          <p key={hash} className="reveal-tx">{hash}</p>
+          <a key={hash} className="reveal-tx" href={buildExplorerTxLink(hash)} target="_blank" rel="noopener noreferrer">
+            {hash}
+          </a>
         ))}
         <button type="button" className="btn btn-secondary" onClick={backToOpenDuels}>
           Back to open duels

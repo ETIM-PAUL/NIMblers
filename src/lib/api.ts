@@ -66,6 +66,29 @@ export async function fetchMyEntries(nimAddress: string): Promise<MyEntry[]> {
   return body.entries as MyEntry[]
 }
 
+export interface DuelHistoryEntry {
+  entryId: string
+  difficulty: Difficulty
+  stakeLuna: number
+  settledAt: string
+  opponentAddress: string
+  outcome: 'won' | 'lost' | 'tied'
+  myDurationMs: number
+  opponentDurationMs: number
+  deltaMs: number
+}
+
+/** Every duel this address has actually finished, as creator or challenger, newest-decided first. */
+export async function fetchDuelHistory(nimAddress: string): Promise<DuelHistoryEntry[]> {
+  const res = await fetch(`/api/duels/history?nimAddress=${encodeURIComponent(nimAddress)}`)
+  const body = await readJsonOrThrow(res, 'Could not load your duel history')
+  return body.history as DuelHistoryEntry[]
+}
+
+export function formatSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(2)}s`
+}
+
 /** "5m ago", "2h ago", "3d ago" — coarse enough that it never needs a live-updating clock. */
 export function formatAge(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime()

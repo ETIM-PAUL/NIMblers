@@ -3,7 +3,7 @@ import { readJsonBody, sendJson, getQueryParams } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
 import { parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from '../entries/houseWallet.ts'
-import { challengeEntry, declineRetry, getEntryForChallenge, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
+import { challengeEntry, declineRetry, getEntryForChallenge, listMyDuelHistory, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
 
 /**
  * Registers Player B's flow: browse open entries, challenge one (stake
@@ -30,6 +30,18 @@ export function registerDuelRoutes(router: Router): void {
     }
     const entries = listMyEntries(getDb(), nimAddress)
     sendJson(res, 200, { entries })
+  })
+
+  // Every duel this address has actually finished, as creator or
+  // challenger, newest-decided first.
+  router.get('/api/duels/history', (req, res) => {
+    const nimAddress = getQueryParams(req).get('nimAddress')
+    if (!nimAddress) {
+      sendJson(res, 400, { error: 'nimAddress query param is required' })
+      return
+    }
+    const history = listMyDuelHistory(getDb(), nimAddress)
+    sendJson(res, 200, { history })
   })
 
   // Resolves a shared duel link — works for a PRIVATE entry too, since

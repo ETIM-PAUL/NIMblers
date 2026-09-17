@@ -674,6 +674,12 @@ button {
   color: var(--danger);
 }
 
+.history-times {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .reveal-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -708,10 +714,20 @@ button {
 }
 
 .reveal-tx {
+  display: block;
   margin: 0;
   font-size: 11px;
   color: var(--text-dim);
   word-break: break-all;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
+}
+
+.reveal-tx:hover,
+.reveal-tx:focus-visible {
+  color: var(--accent);
+  text-decoration-color: currentColor;
 }
 
 /* Empty state */

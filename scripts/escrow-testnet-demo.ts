@@ -43,8 +43,12 @@ async function main() {
   migrateUp()
   const db = getDb()
 
-  console.log('Connecting house wallet to Nimiq testnet (this can take up to a minute)...')
-  const wallet = await createHouseWallet({ privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY') })
+  const wallet = await createHouseWallet({
+    privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY'),
+    rpcUrl: requireEnv('NIMIQ_RPC_URL'),
+    rpcUsername: process.env.NIMIQ_RPC_USERNAME || undefined,
+    rpcPassword: process.env.NIMIQ_RPC_PASSWORD || undefined,
+  })
   console.log(`House wallet address: ${wallet.address}`)
 
   const startingBalance = await getBalance(wallet)
@@ -113,8 +117,5 @@ main()
     process.exitCode = 1
   })
   .finally(() => {
-    // The WASM client's worker keeps timers alive even after a caught
-    // error, so the process won't exit on its own — force it once we've
-    // reported the result.
     process.exit(process.exitCode ?? 0)
   })

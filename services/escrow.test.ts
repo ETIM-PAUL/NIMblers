@@ -135,6 +135,7 @@ function confirmedTx(overrides: Partial<HouseWalletTransaction> = {}): HouseWall
     txHash: 'stake-tx-1',
     senderAddress: PLAYER_ADDRESS,
     recipientAddress: HOUSE_ADDRESS,
+    relatedAddresses: [PLAYER_ADDRESS, HOUSE_ADDRESS],
     valueLuna: 200_000,
     state: 'confirmed',
     confirmations: 5,
@@ -179,9 +180,40 @@ test('receiveStake calling twice with the same key only checks the chain once', 
 test('receiveStake rejects a transaction that does not exist', async () => {
   const wallet = createFakeWallet({ async getTransaction() { return null } })
   await assert.rejects(
-    () => receiveStake(db, wallet, { idempotencyKey: 's1', userId, fromAddress: PLAYER_ADDRESS, valueLuna: 1000, txHash: 'nope' }),
+    () => receiveStake(db, wallet, {
+      idempotencyKey: 's1',
+      userId,
+      fromAddress: PLAYER_ADDRESS,
+      valueLuna: 1000,
+      txHash: 'nope',
+      pollForTransaction: { attempts: 1 },
+    }),
     /not found/,
   )
+})
+
+test('receiveStake retries until the transaction appears, instead of failing on the first miss', async () => {
+  // Nimiq Pay settles the stake through a short-lived HTLC on a slight
+  // delay, so getTransactionByHash can legitimately report "not found" for
+  // a moment before the transaction actually lands.
+  const tx = confirmedTx()
+  let calls = 0
+  const wallet = createFakeWallet({
+    async getTransaction() {
+      calls += 1
+      return calls < 3 ? null : tx
+    },
+  })
+  const record = await receiveStake(db, wallet, {
+    idempotencyKey: 's1b',
+    userId,
+    fromAddress: PLAYER_ADDRESS,
+    valueLuna: 200_000,
+    txHash: tx.txHash,
+    pollForTransaction: { attempts: 5, intervalMs: 0 },
+  })
+  assert.equal(record.type, 'STAKE_RECEIVED')
+  assert.equal(calls, 3)
 })
 
 test('receiveStake rejects a transaction not sent to the house wallet', async () => {
@@ -193,13 +225,37 @@ test('receiveStake rejects a transaction not sent to the house wallet', async ()
   )
 })
 
-test('receiveStake rejects a sender address that does not match the claim', async () => {
-  const tx = confirmedTx({ senderAddress: 'NQ99 SOME ONEE LSEA DDRE SSAA AAAA AAAA AAAA' })
+test('receiveStake rejects a claimed address the transaction has no connection to', async () => {
+  const stranger = 'NQ99 SOME ONEE LSEA DDRE SSAA AAAA AAAA AAAA'
+  const tx = confirmedTx({ senderAddress: stranger, relatedAddresses: [stranger, HOUSE_ADDRESS] })
   const wallet = createFakeWallet({ async getTransaction() { return tx } })
   await assert.rejects(
     () => receiveStake(db, wallet, { idempotencyKey: 's3', userId, fromAddress: PLAYER_ADDRESS, valueLuna: 200_000, txHash: tx.txHash }),
     /sender does not match/,
   )
+})
+
+test('receiveStake accepts a sender address that differs only in spacing/casing from the claim', async () => {
+  // Real-world case: the wallet SDK and the RPC node don't always agree on
+  // "NQ07 XXXX ..." spacing or letter casing for the same address.
+  const differentlyFormatted = PLAYER_ADDRESS.replace(/\s+/g, '').toLowerCase()
+  const tx = confirmedTx({ senderAddress: differentlyFormatted, relatedAddresses: [differentlyFormatted, HOUSE_ADDRESS] })
+  const wallet = createFakeWallet({ async getTransaction() { return tx } })
+  const record = await receiveStake(db, wallet, { idempotencyKey: 's3b', userId, fromAddress: PLAYER_ADDRESS, valueLuna: 200_000, txHash: tx.txHash })
+  assert.equal(record.type, 'STAKE_RECEIVED')
+})
+
+test('receiveStake accepts a claimed address that funded the payment through an HTLC, even though the HTLC itself is the on-chain sender', async () => {
+  // Nimiq Pay routes mini-app payments through a short-lived HTLC: the
+  // settlement transaction that lands in the house wallet is sent *by the
+  // HTLC contract*, not by the player's own address — but the player's
+  // address is still listed among relatedAddresses, which is what
+  // identity should be checked against.
+  const htlcAddress = 'NQ32 HTLC AAAA AAAA AAAA AAAA AAAA AAAA AAAA'
+  const tx = confirmedTx({ senderAddress: htlcAddress, relatedAddresses: [PLAYER_ADDRESS, htlcAddress, HOUSE_ADDRESS] })
+  const wallet = createFakeWallet({ async getTransaction() { return tx } })
+  const record = await receiveStake(db, wallet, { idempotencyKey: 's3c', userId, fromAddress: PLAYER_ADDRESS, valueLuna: 200_000, txHash: tx.txHash })
+  assert.equal(record.type, 'STAKE_RECEIVED')
 })
 
 test('receiveStake rejects a value lower than claimed', async () => {

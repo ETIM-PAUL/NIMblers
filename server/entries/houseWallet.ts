@@ -7,13 +7,17 @@ function requireEnv(name: string): string {
   return value
 }
 
-// A house wallet connection is long-lived (it syncs with the Nimiq
-// network), so it's created once, lazily, on the first request that
-// actually needs it — not eagerly at server startup, which would block
-// every other route behind however long testnet consensus takes.
+// Created once, lazily, on the first request that actually needs it —
+// not eagerly at server startup, which would block every other route
+// behind however long the first RPC call takes.
 let walletPromise: Promise<HouseWallet> | null = null
 let walletFactory: () => Promise<HouseWallet> = () =>
-  createHouseWallet({ privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY') })
+  createHouseWallet({
+    privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY'),
+    rpcUrl: requireEnv('NIMIQ_RPC_URL'),
+    rpcUsername: process.env.NIMIQ_RPC_USERNAME || undefined,
+    rpcPassword: process.env.NIMIQ_RPC_PASSWORD || undefined,
+  })
 
 export function getHouseWallet(): Promise<HouseWallet> {
   walletPromise ??= walletFactory()

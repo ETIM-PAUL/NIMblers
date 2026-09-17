@@ -5,13 +5,20 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', med
 
 export type Visibility = 'PUBLIC' | 'PRIVATE'
 
-/** The query param a shared duel link carries, and the deep link that opens Nimiq Pay straight to it. */
+/** The query param a shared duel link carries. */
 export const DUEL_QUERY_PARAM = 'duel'
 
+/**
+ * A plain https link to this mini app with the duel preset — not a
+ * `nimiqpay://` custom scheme. Chat apps only auto-linkify recognized
+ * schemes, so a custom one just shows up as dead text; a normal URL is
+ * tappable everywhere and still opens straight to this duel, since the app
+ * reads `?duel=` itself on load (see App.tsx's `presetEntryId`).
+ */
 export function buildDuelDeepLink(entryId: string): string {
   const miniAppUrl = new URL(window.location.origin + window.location.pathname)
   miniAppUrl.searchParams.set(DUEL_QUERY_PARAM, entryId)
-  return `nimiqpay://miniapp?url=${encodeURIComponent(miniAppUrl.toString())}`
+  return miniAppUrl.toString()
 }
 
 export function errorMessage(error: unknown): string {
@@ -53,4 +60,11 @@ export function formatAge(iso: string): string {
 
 export function formatLuna(luna: number): string {
   return `${luna / 100_000} NIM`
+}
+
+/** "NQ07 ABCD…WXYZ" — short enough for a header chip, still recognizable at a glance. */
+export function formatAddressShort(address: string): string {
+  const groups = address.split(' ').filter(Boolean)
+  if (groups.length <= 3) return address
+  return `${groups[0]} ${groups[1]}…${groups[groups.length - 1]}`
 }

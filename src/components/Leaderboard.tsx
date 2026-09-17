@@ -36,7 +36,7 @@ export function Leaderboard() {
     <ol className="leaderboard-list">
       {entries.map((entry) => (
         <li key={entry.nimAddress} className="leaderboard-row">
-          <span className="leaderboard-rank">#{entry.rank}</span>
+          <span className={`leaderboard-rank ${entry.rank <= 3 ? `leaderboard-rank-${entry.rank}` : ''}`}>#{entry.rank}</span>
           <Identicon address={entry.nimAddress} size={28} />
           <span className="leaderboard-address">{entry.nimAddress}</span>
           <span className="leaderboard-stats">

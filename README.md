@@ -146,14 +146,29 @@ so there's nothing to fake.
 - **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
   only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
   creation — so a duel's stake can't sit in a trustless on-chain contract
-  waiting for a winner to be decided. A house wallet, run by a real
-  `@nimiq/core` light client, holds both stakes and releases them once the
-  server has resolved the duel. That trade-off is deliberate and stated up
-  front, not hidden in the fine print. Every movement — a stake received, a
-  payout, a refund — is written to one ledger keyed by an idempotency key
-  that's claimed atomically, so a retry (accidental or malicious) can never
-  send twice. `services/escrow.ts` is the *only* module in the codebase
-  allowed to touch that wallet.
+  waiting for a winner to be decided. A house wallet holds both stakes and
+  releases them once the server has resolved the duel. That trade-off is
+  deliberate and stated up front, not hidden in the fine print. Every
+  movement — a stake received, a payout, a refund — is written to one
+  ledger keyed by an idempotency key that's claimed atomically, so a retry
+  (accidental or malicious) can never send twice. `services/escrow.ts` is
+  the *only* module in the codebase allowed to touch that wallet.
+- **House wallet transport — JSON-RPC, not a P2P light client:**
+  `@nimiq/core`'s v2 P2P client (`Nimiq.Client.create()`) spawns a worker
+  thread whose WASM internals call a browser-only `addEventListener`,
+  which Node's `Worker` doesn't provide — a confirmed upstream bug
+  ([nimiq/core-rs-albatross#3417](https://github.com/nimiq/core-rs-albatross/issues/3417)),
+  reproduced with the exact same `Client.create()` pattern this project
+  used to use, under plain Node.js — not specific to any one host or
+  sandbox. `services/nimiqWallet.ts` works around it: transaction
+  *building and signing* (`PrivateKey`, `KeyPair`, `TransactionBuilder`)
+  run synchronously against `@nimiq/core`'s WASM module in the main
+  thread — no worker, unaffected by the bug — so the private key still
+  never leaves this process. Only the *network* calls (balance, broadcast,
+  transaction lookup) go over plain JSON-RPC to a node you point it at,
+  covered end to end by `services/nimiqWallet.test.ts` against a local
+  mock RPC server (real signing, real wire format, no network needed to
+  prove it's correct).
 - **Settlement:** deciding a winner is a pure comparison — the lower of the
   two server-recorded durations wins, an exact tie refunds both — reusing
   the same state-machine logic the duel lifecycle is already property-tested
@@ -260,13 +275,14 @@ server/
   leaderboard/      GET /api/leaderboard — ranks players by total NIM won
 services/
   escrow.ts         The one module allowed to move NIM — stake/payout/refund/balance
-  nimiqWallet.ts    House wallet client (real @nimiq/core testnet light client)
+  nimiqWallet.ts    House wallet client — signs locally, talks JSON-RPC to a testnet node
 scripts/            One-off/scheduled scripts — a live testnet escrow demo, the expiry sweep
 ```
 
 ## House wallet setup (testnet)
 
-`services/escrow.ts` needs a funded testnet house wallet:
+`services/escrow.ts` needs a funded testnet house wallet, and (see "House
+wallet transport" above) a Nimiq testnet node to talk to over JSON-RPC:
 
 ```bash
 node -e "import('@nimiq/core').then(N => console.log(N.PrivateKey.generate().toHex()))"
@@ -277,19 +293,28 @@ gitignored, and it must never be a mainnet key). Then fund that address from
 Nimiq Pay's testnet faucet: long-press the settings button for 10 seconds to
 reveal the dev menu, switch to Testnet, and use "Get free NIM."
 
+Then set `NIMIQ_RPC_URL` (and `NIMIQ_RPC_USERNAME`/`NIMIQ_RPC_PASSWORD` if
+the node requires auth) in `.env` — see `.env.example`. Either:
+
+- request devnet RPC access from Nimiq's team (their Discord), or
+- run your own testnet node with RPC enabled.
+
+Without this, staking/challenging/settling all fail with a clear
+`NIMIQ_RPC_URL is not set` or RPC-connection error rather than hanging —
+there's no light client trying (and failing) to establish P2P consensus
+anymore.
+
 ```bash
 npm run escrow:demo
 ```
 
 runs a full live-testnet round trip against the real network: connect,
 receive a stake, refund it, and prove `payout()` sent only once when called
-twice with the same idempotency key. A Nimiq light client needs a stable,
-long-lived WebSocket connection to the network to establish consensus —
-some restrictive environments (strict corporate proxies, some sandboxed CI
-runners) can prevent that entirely; if the script times out waiting for
-consensus, try it from a normal dev machine's network instead. The
-idempotency guarantee itself doesn't depend on any of that — it's covered
-by `services/escrow.test.ts` against a fake wallet, no network required.
+twice with the same idempotency key. The idempotency guarantee itself
+doesn't depend on any of that — it's covered by `services/escrow.test.ts`
+against a fake wallet, and the RPC transport itself by
+`services/nimiqWallet.test.ts` against a local mock RPC server, no network
+required for either.
 
 ```bash
 npm run expiry:sweep

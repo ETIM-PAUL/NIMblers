@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
 import type { Difficulty, HouseAddressInfo, Visibility } from '../lib/api'
 import { buildDuelDeepLink, DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatLuna, readJsonOrThrow } from '../lib/api'
@@ -24,6 +24,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
   const [allowRematch, setAllowRematch] = useState(false)
   const [houseInfo, setHouseInfo] = useState<HouseAddressInfo | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const linkInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetchHouseAddress().then(setHouseInfo).catch(() => {
@@ -85,13 +86,35 @@ export function DuelPanel({ address, sendPayment }: Props) {
 
   async function copyDeepLink(entryId: string) {
     const link = buildDuelDeepLink(entryId)
+    // navigator.clipboard needs a secure context (https, or localhost) — it's
+    // simply unavailable when testing over a plain-http LAN address, which
+    // is exactly when this fallback (select the visible input + the older
+    // execCommand API) is needed most.
     try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable')
       await navigator.clipboard.writeText(link)
       setCopyStatus('copied')
+      return
+    }
+    catch {
+      // fall through to the execCommand fallback below
+    }
+    try {
+      const input = linkInputRef.current
+      if (!input) throw new Error('no input to select')
+      input.focus()
+      input.select()
+      const copied = document.execCommand('copy')
+      setCopyStatus(copied ? 'copied' : 'failed')
     }
     catch {
       setCopyStatus('failed')
     }
+  }
+
+  function startAnotherDuel() {
+    setCopyStatus('idle')
+    setStage({ name: 'picking' })
   }
 
   if (stage.name === 'picking') {
@@ -167,13 +190,22 @@ export function DuelPanel({ address, sendPayment }: Props) {
         <div className="duel-panel">
           <p className="section-note-best">Private entry created.</p>
           <p className="section-note">Refunded in 24h if unclaimed.{stage.allowRematch && ' Double trial is on.'}</p>
-          <input className="share-link-input" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+          <input
+            ref={linkInputRef}
+            className="share-link-input"
+            readOnly
+            value={link}
+            onFocus={(e) => e.currentTarget.select()}
+          />
           <button type="button" className="btn btn-primary" onClick={() => void copyDeepLink(stage.entryId)}>
             {copyStatus === 'copied' ? 'Copied!' : 'Copy link'}
           </button>
           {copyStatus === 'failed' && (
-            <p className="address-card-error">Couldn't copy — select it manually.</p>
+            <p className="address-card-error">Couldn't copy — tap the link above and copy it manually.</p>
           )}
+          <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
+            Create another duel
+          </button>
         </div>
       )
     }
@@ -181,6 +213,9 @@ export function DuelPanel({ address, sendPayment }: Props) {
       <div className="duel-panel">
         <p className="section-note-best">Waiting for a challenger.</p>
         <p className="section-note">Refunded in 24h if unclaimed.{stage.allowRematch && ' Double trial is on.'}</p>
+        <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
+          Create another duel
+        </button>
       </div>
     )
   }

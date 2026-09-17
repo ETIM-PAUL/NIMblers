@@ -38,6 +38,17 @@ interface PayoutRow {
   tx_hash: string | null
 }
 
+/**
+ * Nimiq user-friendly addresses ("NQ07 0000 ...") are conventionally
+ * space-grouped but not everything that hands one around preserves the
+ * spacing or casing exactly — a wallet SDK, an RPC node, and a value typed
+ * into a form can each normalize differently. Compare on content, not on
+ * incidental formatting.
+ */
+function normalizeAddress(address: string): string {
+  return address.replace(/\s+/g, '').toUpperCase()
+}
+
 function toPayoutRecord(row: PayoutRow): PayoutRecord {
   return {
     id: row.id,
@@ -123,6 +134,36 @@ export interface ReceiveStakeInput {
   valueLuna: number
   /** Hash of the transaction the player already sent, through their own Nimiq Pay wallet. */
   txHash: string
+  /** Overrides the default wait for the transaction to appear on-chain — tests use this to skip the real-time delay. */
+  pollForTransaction?: { attempts?: number, intervalMs?: number }
+}
+
+/**
+ * Nimiq Pay routes a mini-app payment through a short-lived HTLC: the
+ * player's wallet broadcasts one transaction, then Nimiq Pay's own backend
+ * settles a second transaction (HTLC to house wallet) once the first is
+ * seen — a gap of a few seconds that's entirely normal, not a failure.
+ * `getTransactionByHash` on a real node reports "not found" for a hash
+ * that simply hasn't landed yet, indistinguishable from one that never
+ * will — so give it a real window to show up before concluding it's
+ * actually missing.
+ */
+// Real-time delay only makes sense against a real, slow chain — in tests
+// (NODE_ENV=test) it'd otherwise turn every "this stake doesn't exist"
+// assertion into a multi-second wait for no reason.
+const DEFAULT_POLL_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 2000
+
+async function waitForTransaction(
+  wallet: HouseWallet,
+  txHash: string,
+  { attempts = 15, intervalMs = DEFAULT_POLL_INTERVAL_MS } = {},
+): Promise<NonNullable<Awaited<ReturnType<HouseWallet['getTransaction']>>>> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const tx = await wallet.getTransaction(txHash)
+    if (tx) return tx
+    if (attempt < attempts) await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
+  throw new Error(`Transaction ${txHash} was not found`)
 }
 
 /**
@@ -138,10 +179,20 @@ export function receiveStake(db: DatabaseSync, wallet: HouseWallet, input: Recei
     db,
     { idempotencyKey: input.idempotencyKey, userId: input.userId, type: 'STAKE_RECEIVED', amountLuna: input.valueLuna },
     async () => {
-      const tx = await wallet.getTransaction(input.txHash)
-      if (!tx) throw new Error(`Transaction ${input.txHash} was not found`)
-      if (tx.recipientAddress !== wallet.address) throw new Error('Transaction was not sent to the house wallet')
-      if (tx.senderAddress !== input.fromAddress) throw new Error("Transaction sender does not match the claimed address")
+      const tx = await waitForTransaction(wallet, input.txHash, input.pollForTransaction)
+      if (normalizeAddress(tx.recipientAddress) !== normalizeAddress(wallet.address)) {
+        throw new Error(`Transaction was not sent to the house wallet (sent to ${tx.recipientAddress}, expected ${wallet.address})`)
+      }
+      // Not a plain equality check against tx.senderAddress: Nimiq Pay
+      // routes mini-app payments through a short-lived HTLC, so the
+      // transaction that lands in the house wallet is sent *by the HTLC*,
+      // not by the player's own address. relatedAddresses still lists the
+      // player's address as a party to the transfer — that's the right
+      // thing to check identity against.
+      const relatedAddresses = tx.relatedAddresses ?? [tx.senderAddress]
+      if (!relatedAddresses.some(related => normalizeAddress(related) === normalizeAddress(input.fromAddress))) {
+        throw new Error(`Transaction sender does not match the claimed address (chain says ${tx.senderAddress}, claimed ${input.fromAddress})`)
+      }
       if (tx.valueLuna < input.valueLuna) throw new Error('Transaction value is less than the claimed stake')
       if (tx.state !== 'included' && tx.state !== 'confirmed') {
         throw new Error(`Transaction is not yet confirmed (state: ${tx.state})`)

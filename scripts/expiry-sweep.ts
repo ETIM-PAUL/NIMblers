@@ -24,8 +24,12 @@ async function main() {
   migrateUp()
   const db = getDb()
 
-  console.log('Connecting house wallet to Nimiq testnet (this can take up to a minute)...')
-  const wallet = await createHouseWallet({ privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY') })
+  const wallet = await createHouseWallet({
+    privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY'),
+    rpcUrl: requireEnv('NIMIQ_RPC_URL'),
+    rpcUsername: process.env.NIMIQ_RPC_USERNAME || undefined,
+    rpcPassword: process.env.NIMIQ_RPC_PASSWORD || undefined,
+  })
 
   const result = await runExpirySweep(db, wallet)
   console.log(`Released ${result.releasedLocks.length} stale lock(s): ${JSON.stringify(result.releasedLocks)}`)
@@ -44,7 +48,5 @@ main()
     process.exitCode = 1
   })
   .finally(() => {
-    // Same as escrow-testnet-demo.ts: the WASM client's worker keeps timers
-    // alive even after a caught error, so force the exit once done.
     process.exit(process.exitCode ?? 0)
   })

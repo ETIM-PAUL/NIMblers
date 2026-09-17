@@ -32,6 +32,9 @@ export function TypingEngine({ paragraph, onSubmit }: Props) {
 
   return (
     <div className="typing-engine">
+      <div className="typing-progress">
+        <div className="typing-progress-fill" style={{ width: `${(typed.length / paragraph.length) * 100}%` }} />
+      </div>
       <p
         className="typing-paragraph"
         onClick={() => inputRef.current?.focus()}

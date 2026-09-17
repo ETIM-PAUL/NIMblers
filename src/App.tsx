@@ -4,10 +4,21 @@ import { ChallengeBrowser } from './components/ChallengeBrowser'
 import { ConnectionBanner } from './components/ConnectionBanner'
 import { DuelPanel } from './components/DuelPanel'
 import { Leaderboard } from './components/Leaderboard'
+import { BoardIcon, DuelIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
 import { PracticePanel } from './components/PracticePanel'
 import { DUEL_QUERY_PARAM } from './lib/api'
 import { useNimiq } from './lib/useNimiq'
+
+const TABS = ['duel', 'open', 'practice', 'leaderboard'] as const
+type Tab = typeof TABS[number]
+
+const TAB_ICONS: Record<Tab, React.ReactNode> = {
+  duel: <DuelIcon />,
+  open: <OpenIcon />,
+  practice: <PracticeIcon />,
+  leaderboard: <BoardIcon />,
+}
 
 function App() {
   const {
@@ -26,6 +37,8 @@ function App() {
   // src/lib/api.ts's buildDuelDeepLink) instead of the public browse list.
   // Read once — the param that opened this session doesn't change later.
   const [presetEntryId] = useState(() => new URLSearchParams(window.location.search).get(DUEL_QUERY_PARAM) ?? undefined)
+  const [activeTab, setActiveTab] = useState<Tab>(presetEntryId ? 'open' : 'duel')
+  const tabLabels: Record<Tab, string> = { duel: 'Duel', open: presetEntryId ? 'Invite' : 'Open', practice: 'Practice', leaderboard: 'Board' }
 
   if (isConnecting) {
     return (
@@ -45,45 +58,55 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1 className="app-title">Typing Duel</h1>
-        <p className="app-subtitle">Async 1v1 speed-typing duels for NIM</p>
-      </header>
-
-      <ConnectionBanner isReady={isReady} hasConsensus={hasConsensus} />
-
-      <main className="app-main">
+      <header className="app-bar">
+        <h1 className="app-bar-title">Typing Duel</h1>
         <AddressCard
           address={address}
           isLoading={isLoadingAddress}
           error={addressError}
           onConnect={connectWallet}
         />
+      </header>
 
-        <section className="section">
-          <h2 className="section-title">Duel</h2>
+      <ConnectionBanner isReady={isReady} hasConsensus={hasConsensus} />
+
+      <main className="app-main">
+        <section className="section" hidden={activeTab !== 'duel'}>
           {address
             ? <DuelPanel address={address} sendPayment={sendPayment} />
-            : <p className="section-note">Show your address to start a duel.</p>}
+            : <p className="section-note">Connect your wallet to start a duel.</p>}
         </section>
 
-        <section className="section">
-          <h2 className="section-title">{presetEntryId ? 'Duel invite' : 'Open duels'}</h2>
+        <section className="section" hidden={activeTab !== 'open'}>
           {address
             ? <ChallengeBrowser address={address} sendPayment={sendPayment} presetEntryId={presetEntryId} />
-            : <p className="section-note">Show your address to {presetEntryId ? 'see this duel' : 'browse duels'}.</p>}
+            : <p className="section-note">Connect your wallet to {presetEntryId ? 'see this duel' : 'browse duels'}.</p>}
         </section>
 
-        <section className="section">
-          <h2 className="section-title">Practice</h2>
+        <section className="section" hidden={activeTab !== 'practice'}>
           <PracticePanel />
         </section>
 
-        <section className="section">
-          <h2 className="section-title">Leaderboard</h2>
+        <section className="section" hidden={activeTab !== 'leaderboard'}>
           <Leaderboard />
         </section>
       </main>
+
+      <nav className="bottom-nav">
+        <div className="bottom-nav-inner">
+          {TABS.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              className={`nav-item ${activeTab === tab ? 'nav-item-active' : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              <span className="nav-icon">{TAB_ICONS[tab]}</span>
+              {tabLabels[tab]}
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   )
 }

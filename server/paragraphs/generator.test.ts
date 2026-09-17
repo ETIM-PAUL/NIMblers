@@ -45,3 +45,25 @@ test('only ASCII-typeable characters ever appear — nothing that would be impos
     }
   }
 })
+
+test('Nimiq/typing-duel branded vocabulary shows up often enough to give the content its own identity', () => {
+  const BRANDED_SAMPLE = [
+    'wallet', 'ledger', 'escrow', 'signer', 'keypair', 'address', 'duelist', 'stake', 'nimiq',
+    'testnet', 'mainnet', 'keystroke', 'paragraph', 'opponent', 'rematch', 'custodian', 'validator',
+    'consensus', 'mempool', 'signature', 'blockchain', 'transaction', 'leaderboard', 'challenger',
+    'custodial', 'trustless', 'immutable', 'ephemeral', 'verifiable', 'unguessable', 'unstoppable',
+    'instantly', 'securely', 'provably', 'verifiably', 'atomically', 'immutably', 'irrevocably',
+  ]
+  const corpus = Array.from({ length: 60 }, () => generateParagraph('medium')).join(' ').toLowerCase()
+  const hits = BRANDED_SAMPLE.filter((word) => corpus.includes(word))
+  assert.ok(hits.length > 3, `expected several branded words across 60 draws, found: ${hits.join(', ') || '(none)'}`)
+})
+
+test('a branded verb never gets a naive "s" tacked on — "verifies" not "verifys", "rematches" not "rematchs"', () => {
+  const corpus = Array.from({ length: 80 }, () => generateParagraph('easy').toLowerCase())
+    .concat(Array.from({ length: 80 }, () => generateParagraph('medium').toLowerCase()))
+    .join(' ')
+  for (const broken of ['verifys', 'rematchs', 'vanishs']) {
+    assert.ok(!corpus.includes(broken), `found a broken suffix "${broken}" in generated output`)
+  }
+})

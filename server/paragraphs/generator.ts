@@ -27,7 +27,49 @@ interface LengthRange {
   max: number
 }
 
+/**
+ * A pinch of Nimiq/typing-duel flavor mixed into otherwise-generic word
+ * banks, so the content reads as *this app's* rather than interchangeable
+ * lorem-ipsum-style filler. Only nouns/verbs/adjectives/adverbs get a
+ * brand bank — prepositions and conjunctions are function words, and
+ * branding those wouldn't read as anything.
+ */
+const BRANDED_WORDS: Partial<Record<WordKind, string[]>> = {
+  noun: [
+    'wallet', 'ledger', 'escrow', 'signer', 'keypair', 'address', 'duelist', 'stake', 'nimiq',
+    'testnet', 'mainnet', 'keystroke', 'paragraph', 'opponent', 'rematch', 'custodian', 'validator',
+    'consensus', 'mempool', 'signature', 'blockchain', 'transaction', 'leaderboard', 'challenger',
+    'throughput', 'cryptography', 'interoperability', 'decentralization',
+  ],
+  verb: [
+    'stake', 'settle', 'confirm', 'broadcast', 'verify', 'duel', 'race', 'reconcile', 'validate',
+    'authenticate', 'rematch', 'typewrite',
+  ],
+  adjective: [
+    'custodial', 'trustless', 'immutable', 'ephemeral', 'verifiable', 'unguessable', 'unstoppable',
+    'cryptographic', 'deterministic', 'asynchronous', 'decentralized',
+  ],
+  adverb: [
+    'instantly', 'securely', 'provably', 'verifiably', 'atomically', 'immutably', 'irrevocably',
+    'anonymously', 'transparently', 'asynchronously',
+  ],
+}
+
+/** How often a slot reaches for a branded word instead of a generic one, when a length-matching one exists. */
+const BRAND_MIX_PROBABILITY = 0.35
+
+function brandedWordInRange(kind: WordKind, length: LengthRange): string | undefined {
+  const bank = BRANDED_WORDS[kind]
+  if (!bank) return undefined
+  const candidates = bank.filter((w) => w.length >= length.min && w.length <= length.max)
+  return candidates.length > 0 ? faker.helpers.arrayElement(candidates) : undefined
+}
+
 function word(kind: WordKind, length: LengthRange): string {
+  if (faker.datatype.boolean({ probability: BRAND_MIX_PROBABILITY })) {
+    const branded = brandedWordInRange(kind, length)
+    if (branded) return branded
+  }
   const options = { length, strategy: 'closest' as const }
   switch (kind) {
     case 'adjective': return faker.word.adjective(options)
@@ -37,6 +79,19 @@ function word(kind: WordKind, length: LengthRange): string {
     case 'preposition': return faker.word.preposition(options)
     case 'verb': return faker.word.verb(options)
   }
+}
+
+/**
+ * Naive but real English pluralization/3rd-person-present suffix rule —
+ * "verify" -> "verifies", not "verifys"; "rematch" -> "rematches", not
+ * "rematchs". Matters more now that branded words (verify, rematch,
+ * authenticate...) are common enough in the output that a broken suffix
+ * on one of them reads as sloppy rather than just random-filler noise.
+ */
+function addS(base: string): string {
+  if (/(?:[sxz]|ch|sh)$/.test(base)) return `${base}es`
+  if (/[^aeiou]y$/.test(base)) return `${base.slice(0, -1)}ies`
+  return `${base}s`
 }
 
 function capitalize(s: string): string {
@@ -56,7 +111,11 @@ function finish(raw: string): string {
 interface TemplateSlots {
   adj: () => string
   noun: () => string
+  /** A fresh plural noun (own random draw, not a re-suffixed previous one). */
+  nounPlural: () => string
   verb: () => string
+  /** A fresh 3rd-person-singular-present verb, correctly suffixed. */
+  verbS: () => string
   adv: () => string
   prep: () => string
   conj: () => string
@@ -67,7 +126,9 @@ function slotsFor(length: LengthRange): TemplateSlots {
   return {
     adj: () => word('adjective', length),
     noun: () => word('noun', length),
+    nounPlural: () => addS(word('noun', length)),
     verb: () => word('verb', length),
+    verbS: () => addS(word('verb', length)),
     adv: () => word('adverb', length),
     prep: () => word('preposition', length),
     conj: () => word('conjunction', length),
@@ -77,24 +138,24 @@ function slotsFor(length: LengthRange): TemplateSlots {
 
 /** One clause, one comma at most — a two-part sentence, not a bare simple one. */
 const TWO_CLAUSE_TEMPLATES: ((s: TemplateSlots) => string)[] = [
-  (s) => { const adj = s.adj(); return `${article(adj)} ${adj} ${s.noun()} ${s.verb()}s ${s.adv()}, which ${s.verb()}s the ${s.adj()} ${s.noun()}` },
-  (s) => `${s.adj()} ${s.noun()}s rarely ${s.verb()}, but ${s.adj()} ${s.noun()}s ${s.verb()} ${s.adv()}`,
-  (s) => `if the ${s.noun()} ${s.verb()}s ${s.adv()}, the ${s.adj()} ${s.noun()} ${s.verb()}s ${s.prep()} the ${s.noun()}`,
-  (s) => `the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s ${s.adv()} ${s.prep()} the ${s.adj()} ${s.noun()}`,
+  (s) => { const adj = s.adj(); return `${article(adj)} ${adj} ${s.noun()} ${s.verbS()} ${s.adv()}, which ${s.verbS()} the ${s.adj()} ${s.noun()}` },
+  (s) => `${s.adj()} ${s.nounPlural()} rarely ${s.verb()}, but ${s.adj()} ${s.nounPlural()} ${s.verb()} ${s.adv()}`,
+  (s) => `if the ${s.noun()} ${s.verbS()} ${s.adv()}, the ${s.adj()} ${s.noun()} ${s.verbS()} ${s.prep()} the ${s.noun()}`,
+  (s) => `the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} ${s.adv()} ${s.prep()} the ${s.adj()} ${s.noun()}`,
 ]
 
 /** Two clauses joined by a semicolon or "yet"/"although", a possessive, and a number. */
 const SEMICOLON_TEMPLATES: ((s: TemplateSlots) => string)[] = [
-  (s) => `the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s ${s.adv()}; ${s.number()} ${s.noun()}s ${s.verb()} ${s.prep()} the ${s.adj()} ${s.noun()}`,
-  (s) => `${s.adj()} ${s.noun()}s ${s.verb()} ${s.adv()}, yet the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s the ${s.adj()} ${s.noun()} ${s.number()} times`,
-  (s) => `although the ${s.adj()} ${s.noun()} ${s.verb()}s ${s.adv()}, the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s ${s.prep()} ${s.number()} ${s.adj()} ${s.noun()}s`,
+  (s) => `the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} ${s.adv()}; ${s.number()} ${s.nounPlural()} ${s.verb()} ${s.prep()} the ${s.adj()} ${s.noun()}`,
+  (s) => `${s.adj()} ${s.nounPlural()} ${s.verb()} ${s.adv()}, yet the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} the ${s.adj()} ${s.noun()} ${s.number()} times`,
+  (s) => `although the ${s.adj()} ${s.noun()} ${s.verbS()} ${s.adv()}, the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} ${s.prep()} ${s.number()} ${s.adj()} ${s.nounPlural()}`,
 ]
 
 /** Three-plus clauses, multiple punctuation marks, two possessives, two numbers — the longest, most typo-prone shape. */
 const MULTI_CLAUSE_TEMPLATES: ((s: TemplateSlots) => string)[] = [
-  (s) => `${s.adj()} ${s.noun()}s ${s.verb()} ${s.adv()}: the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s ${s.prep()} ${s.number()} ${s.adj()} ${s.noun()}s, yet the ${s.adj()} ${s.noun()} ${s.verb()}s ${s.adv()}`,
-  (s) => `although the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s ${s.adv()} ${s.prep()} ${s.number()} ${s.adj()} ${s.noun()}s; the ${s.adj()} ${s.noun()} ${s.verb()}s ${s.adv()}, and the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verb()}s ${s.prep()} the ${s.adj()} ${s.noun()}`,
-  (s) => `${s.number()} ${s.adj()} ${s.noun()}s ${s.verb()} ${s.adv()} ${s.prep()} the ${s.noun()}'s ${s.adj()} ${s.noun()}; ${s.number()} ${s.adj()} ${s.noun()}s ${s.verb()} ${s.adv()}, yet the ${s.adj()} ${s.noun()} ${s.verb()}s ${s.prep()} ${s.number()} ${s.adj()} ${s.noun()}s`,
+  (s) => `${s.adj()} ${s.nounPlural()} ${s.verb()} ${s.adv()}: the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} ${s.prep()} ${s.number()} ${s.adj()} ${s.nounPlural()}, yet the ${s.adj()} ${s.noun()} ${s.verbS()} ${s.adv()}`,
+  (s) => `although the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} ${s.adv()} ${s.prep()} ${s.number()} ${s.adj()} ${s.nounPlural()}; the ${s.adj()} ${s.noun()} ${s.verbS()} ${s.adv()}, and the ${s.noun()}'s ${s.adj()} ${s.noun()} ${s.verbS()} ${s.prep()} the ${s.adj()} ${s.noun()}`,
+  (s) => `${s.number()} ${s.adj()} ${s.nounPlural()} ${s.verb()} ${s.adv()} ${s.prep()} the ${s.noun()}'s ${s.adj()} ${s.noun()}; ${s.number()} ${s.adj()} ${s.nounPlural()} ${s.verb()} ${s.adv()}, yet the ${s.adj()} ${s.noun()} ${s.verbS()} ${s.prep()} ${s.number()} ${s.adj()} ${s.nounPlural()}`,
 ]
 
 const DIFFICULTY_CONFIG: Record<Difficulty, { length: LengthRange, templates: ((s: TemplateSlots) => string)[] }> = {

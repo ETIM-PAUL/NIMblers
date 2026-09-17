@@ -6,7 +6,10 @@ import type { Difficulty } from '../lib/api'
 import { DIFFICULTIES, DIFFICULTY_LABELS } from '../lib/api'
 import { getBrowserLocalStorage } from '../lib/browserStorage'
 import { getPersonalBest, recordResult } from '../lib/personalBest'
+import { EasyIcon, HardIcon, MediumIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
+
+const DIFFICULTY_ICONS: Record<Difficulty, React.ReactNode> = { easy: <EasyIcon />, medium: <MediumIcon />, hard: <HardIcon /> }
 
 function pickParagraph(difficulty: Difficulty): string {
   return getPracticeParagraph(PARAGRAPH_POOL, new Date(), Math.random, difficulty).body
@@ -48,23 +51,21 @@ export function PracticePanel() {
 
     return (
       <div className="difficulty-picker-wrap">
+        <p className="section-note">No stakes here — just you against the clock.</p>
         <div className="difficulty-picker">
-          {DIFFICULTIES.map((d) => (
+          {DIFFICULTIES.map((d, i) => (
             <button
               key={d}
               type="button"
-              className={`btn btn-difficulty btn-difficulty-${d}`}
+              className={`btn-difficulty btn-difficulty-${d}`}
               onClick={() => selectDifficulty(d)}
             >
-              {DIFFICULTY_LABELS[d]}
+              <span className="btn-difficulty-icon">{DIFFICULTY_ICONS[d]}</span>
+              <span className="btn-difficulty-label">{DIFFICULTY_LABELS[d]}</span>
+              <span className="btn-difficulty-stake">{bests[i] !== null ? `PB ${formatMs(bests[i])}` : 'No PB yet'}</span>
             </button>
           ))}
         </div>
-        {bests.some((best) => best !== null) && (
-          <p className="section-note">
-            Best — {DIFFICULTIES.map((d, i) => `${DIFFICULTY_LABELS[d]}: ${bests[i] !== null ? formatMs(bests[i]) : '—'}`).join(' · ')}
-          </p>
-        )}
       </div>
     )
   }

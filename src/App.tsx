@@ -4,10 +4,10 @@ import { ChallengeBrowser } from './components/ChallengeBrowser'
 import { ConnectionBanner } from './components/ConnectionBanner'
 import { DuelPanel } from './components/DuelPanel'
 import { Leaderboard } from './components/Leaderboard'
-import { BoardIcon, DuelIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
+import { AppLogo, BoardIcon, DuelIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
 import { OpenInNimiqPay } from './components/OpenInNimiqPay'
 import { PracticePanel } from './components/PracticePanel'
-import { DUEL_QUERY_PARAM } from './lib/api'
+import { DUEL_QUERY_PARAM } from './lib/duelLink'
 import { useNimiq } from './lib/useNimiq'
 
 const TABS = ['duel', 'open', 'practice', 'leaderboard'] as const
@@ -59,7 +59,10 @@ function App() {
   return (
     <div className="app">
       <header className="app-bar">
-        <h1 className="app-bar-title">Typing Duel</h1>
+        <div className="app-bar-brand">
+          <AppLogo />
+          <h1 className="app-bar-title">NIMble</h1>
+        </div>
         <AddressCard
           address={address}
           isLoading={isLoadingAddress}

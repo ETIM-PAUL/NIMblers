@@ -13,5 +13,5 @@ registerDuelRoutes(router)
 registerLeaderboardRoutes(router)
 
 router.server.listen(port, () => {
-  console.log(`Typing Duel API listening on :${port}`)
+  console.log(`NIMble API listening on :${port}`)
 })

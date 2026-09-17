@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Difficulty, DuelRow, EntryRow, EntryVisibility } from '../db/types.ts'
+import type { Difficulty, DuelRow, EntryRow, EntryStatus, EntryVisibility } from '../db/types.ts'
 import { getOrCreateUser, getUserAddress } from '../db/users.ts'
 import { confirmStake } from '../entries/service.ts'
 import { submitRun } from '../runs/service.ts'
@@ -58,6 +58,70 @@ export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): O
       difficulty: row.difficulty,
       createdAt: row.created_at,
     }))
+}
+
+export interface MyEntrySummary {
+  entryId: string
+  stakeLuna: number
+  difficulty: Difficulty
+  status: EntryStatus
+  visibility: EntryVisibility
+  createdAt: string
+  expiresAt: string
+  /** Set once a challenger has taken the entry, so a creator can see who they're up against. */
+  challengerAddress: string | null
+  /** Null until settled — 'creator' means this entry's own creator won. */
+  outcome: 'creator' | 'challenger' | 'tie' | null
+}
+
+/**
+ * Every entry this address has created, any status or visibility — the
+ * creator's own view of "what have I got open," independent of whatever
+ * local UI state a single browser tab happens to be holding (which is
+ * lost on reload, or when opened from a different device).
+ */
+export function listMyEntries(db: DatabaseSync, nimAddress: string): MyEntrySummary[] {
+  const rows = db
+    .prepare(
+      `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, p.difficulty, e.status, e.visibility,
+              e.created_at, e.expires_at, cu.nim_address as challenger_address, d.winner_user_id, d.settled_at
+       FROM entries e
+       JOIN users u ON u.id = e.creator_user_id
+       JOIN paragraphs p ON p.id = e.paragraph_id
+       LEFT JOIN duels d ON d.entry_id = e.id
+       LEFT JOIN users cu ON cu.id = d.challenger_user_id
+       WHERE u.nim_address = ?
+       ORDER BY e.created_at DESC`,
+    )
+    .all(nimAddress) as {
+      entry_id: string
+      creator_user_id: string
+      stake_luna: number
+      difficulty: Difficulty
+      status: EntryStatus
+      visibility: EntryVisibility
+      created_at: string
+      expires_at: string
+      challenger_address: string | null
+      winner_user_id: string | null
+      settled_at: string | null
+    }[]
+
+  return rows.map((row) => ({
+    entryId: row.entry_id,
+    stakeLuna: row.stake_luna,
+    difficulty: row.difficulty,
+    status: row.status,
+    visibility: row.visibility,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    challengerAddress: row.challenger_address,
+    outcome: row.settled_at === null
+      ? null
+      : row.winner_user_id === null
+        ? 'tie'
+        : row.winner_user_id === row.creator_user_id ? 'creator' : 'challenger',
+  }))
 }
 
 export type EntryLookupResult =

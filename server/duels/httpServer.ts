@@ -3,7 +3,7 @@ import { readJsonBody, sendJson, getQueryParams } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
 import { parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from '../entries/houseWallet.ts'
-import { challengeEntry, declineRetry, getEntryForChallenge, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
+import { challengeEntry, declineRetry, getEntryForChallenge, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
 
 /**
  * Registers Player B's flow: browse open entries, challenge one (stake
@@ -16,6 +16,19 @@ export function registerDuelRoutes(router: Router): void {
   router.get('/api/entries', (req, res) => {
     const exclude = getQueryParams(req).get('exclude') ?? undefined
     const entries = listOpenEntries(getDb(), exclude)
+    sendJson(res, 200, { entries })
+  })
+
+  // Every entry this address created, any status/visibility — separate
+  // from the public browse list above, which deliberately excludes both
+  // the caller's own entries and anything PRIVATE.
+  router.get('/api/entries/mine', (req, res) => {
+    const nimAddress = getQueryParams(req).get('nimAddress')
+    if (!nimAddress) {
+      sendJson(res, 400, { error: 'nimAddress query param is required' })
+      return
+    }
+    const entries = listMyEntries(getDb(), nimAddress)
     sendJson(res, 200, { entries })
   })
 

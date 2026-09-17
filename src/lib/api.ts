@@ -1,12 +1,11 @@
+import { DUEL_QUERY_PARAM } from './duelLink.ts'
+
 export type Difficulty = 'easy' | 'medium' | 'hard'
 
 export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
 
 export type Visibility = 'PUBLIC' | 'PRIVATE'
-
-/** The query param a shared duel link carries. */
-export const DUEL_QUERY_PARAM = 'duel'
 
 /**
  * A plain https link to this mini app with the duel preset — not a
@@ -44,6 +43,27 @@ export async function fetchHouseAddress(): Promise<HouseAddressInfo> {
   const res = await fetch('/api/house-address')
   const body = await readJsonOrThrow(res, 'Could not reach the house wallet')
   return { address: body.address as string, stakes: body.stakes as Record<Difficulty, number> }
+}
+
+export type EntryStatus = 'OPEN' | 'LOCKED' | 'SETTLED' | 'EXPIRED'
+
+export interface MyEntry {
+  entryId: string
+  stakeLuna: number
+  difficulty: Difficulty
+  status: EntryStatus
+  visibility: Visibility
+  createdAt: string
+  expiresAt: string
+  challengerAddress: string | null
+  outcome: 'creator' | 'challenger' | 'tie' | null
+}
+
+/** Every duel this address created — any status or visibility, independent of local browser state. */
+export async function fetchMyEntries(nimAddress: string): Promise<MyEntry[]> {
+  const res = await fetch(`/api/entries/mine?nimAddress=${encodeURIComponent(nimAddress)}`)
+  const body = await readJsonOrThrow(res, 'Could not load your duels')
+  return body.entries as MyEntry[]
 }
 
 /** "5m ago", "2h ago", "3d ago" — coarse enough that it never needs a live-updating clock. */

@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
 import type { Difficulty, HouseAddressInfo, Visibility } from '../lib/api'
 import { buildDuelDeepLink, DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatLuna, readJsonOrThrow } from '../lib/api'
+import { copyText } from '../lib/clipboard'
+import { EasyIcon, HardIcon, MediumIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
+
+const DIFFICULTY_ICONS: Record<Difficulty, React.ReactNode> = { easy: <EasyIcon />, medium: <MediumIcon />, hard: <HardIcon /> }
 
 interface Props {
   address: string
@@ -86,30 +90,8 @@ export function DuelPanel({ address, sendPayment }: Props) {
 
   async function copyDeepLink(entryId: string) {
     const link = buildDuelDeepLink(entryId)
-    // navigator.clipboard needs a secure context (https, or localhost) — it's
-    // simply unavailable when testing over a plain-http LAN address, which
-    // is exactly when this fallback (select the visible input + the older
-    // execCommand API) is needed most.
-    try {
-      if (!navigator.clipboard) throw new Error('Clipboard API unavailable')
-      await navigator.clipboard.writeText(link)
-      setCopyStatus('copied')
-      return
-    }
-    catch {
-      // fall through to the execCommand fallback below
-    }
-    try {
-      const input = linkInputRef.current
-      if (!input) throw new Error('no input to select')
-      input.focus()
-      input.select()
-      const copied = document.execCommand('copy')
-      setCopyStatus(copied ? 'copied' : 'failed')
-    }
-    catch {
-      setCopyStatus('failed')
-    }
+    const copied = await copyText(link, linkInputRef.current)
+    setCopyStatus(copied ? 'copied' : 'failed')
   }
 
   function startAnotherDuel() {
@@ -128,7 +110,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
             className={`btn btn-toggle ${visibility === 'PUBLIC' ? 'btn-toggle-active' : ''}`}
             onClick={() => setVisibility('PUBLIC')}
           >
-            Public — anyone can find it
+            Public
           </button>
           <button
             type="button"
@@ -138,7 +120,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
             Private — invite by link
           </button>
         </div>
-        <label className="rematch-toggle">
+        <label className="rematch-toggle" style={{ margin: '1rem 0' }}>
           <input type="checkbox" checked={allowRematch} onChange={(e) => setAllowRematch(e.target.checked)} />
           Allow double trial (loser can retry for 2x)
         </label>
@@ -147,10 +129,11 @@ export function DuelPanel({ address, sendPayment }: Props) {
             <button
               key={d}
               type="button"
-              className={`btn btn-difficulty btn-difficulty-${d}`}
+              className={`btn-difficulty btn-difficulty-${d}`}
               onClick={() => void handleStake(d)}
             >
-              {DIFFICULTY_LABELS[d]}
+              <span className="btn-difficulty-icon">{DIFFICULTY_ICONS[d]}</span>
+              <span className="btn-difficulty-label">{DIFFICULTY_LABELS[d]}</span>
               {houseInfo && <span className="btn-difficulty-stake">{formatLuna(houseInfo.stakes[d])}</span>}
             </button>
           ))}

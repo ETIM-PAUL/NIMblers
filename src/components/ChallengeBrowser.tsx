@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import type { Difficulty } from '../lib/api'
-import { DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatAge, formatLuna, readJsonOrThrow } from '../lib/api'
+import type { Difficulty, MyEntry } from '../lib/api'
+import { buildDuelDeepLink, errorMessage, fetchHouseAddress, fetchMyEntries, formatAge, formatLuna, readJsonOrThrow } from '../lib/api'
+import { copyText } from '../lib/clipboard'
+import { parseDuelEntryId } from '../lib/duelLink'
+import { DifficultyChip } from './DifficultyChip'
+import { EmptyState } from './EmptyState'
 import { Identicon } from './Identicon'
+import { OpenIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -52,10 +57,30 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
+/** The creator's-eye view of one of their own entries — a status pill's text and color modifier. */
+function myEntryStatus(entry: MyEntry): { label: string, modifier: string } {
+  if (entry.status === 'OPEN') return { label: 'Waiting for a challenger', modifier: 'waiting' }
+  if (entry.status === 'LOCKED') {
+    return { label: `Being played${entry.challengerAddress ? ` — vs ${entry.challengerAddress}` : ''}`, modifier: 'playing' }
+  }
+  if (entry.status === 'EXPIRED') return { label: 'Expired — refunded', modifier: 'neutral' }
+  // SETTLED
+  if (entry.outcome === 'creator') return { label: 'You won', modifier: 'won' }
+  if (entry.outcome === 'challenger') return { label: 'You lost', modifier: 'lost' }
+  return { label: 'Tied — refunded', modifier: 'neutral' }
+}
+
 export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props) {
   const [stage, setStage] = useState<Stage>(presetEntryId ? { name: 'loading-invite' } : { name: 'browsing' })
+  const [browseTab, setBrowseTab] = useState<'open' | 'mine'>('open')
   const [entries, setEntries] = useState<OpenEntry[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
+  const [myEntries, setMyEntries] = useState<MyEntry[] | null>(null)
+  const [myEntriesError, setMyEntriesError] = useState<string | null>(null)
+  const [pastedLink, setPastedLink] = useState('')
+  const [pastedLinkError, setPastedLinkError] = useState<string | null>(null)
+  const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null)
+  const copyFallbackRef = useRef<HTMLInputElement>(null)
 
   const loadEntries = useCallback(async () => {
     try {
@@ -69,25 +94,69 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
     }
   }, [address])
 
-  useEffect(() => {
-    if (stage.name === 'browsing') void loadEntries()
-  }, [stage.name, loadEntries])
+  const loadMyEntries = useCallback(async () => {
+    try {
+      setMyEntries(await fetchMyEntries(address))
+      setMyEntriesError(null)
+    }
+    catch (error) {
+      setMyEntriesError(errorMessage(error))
+    }
+  }, [address])
 
   useEffect(() => {
-    if (!presetEntryId) return
-    let cancelled = false
-    fetch(`/api/entries/lookup?entryId=${encodeURIComponent(presetEntryId)}&exclude=${encodeURIComponent(address)}`)
-      .then((res) => readJsonOrThrow(res, 'Could not load this duel'))
-      .then((body) => {
-        if (!cancelled) setStage({ name: 'invite', entry: body.entry as OpenEntry })
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setStage({ name: 'error', message: errorMessage(error) })
-      })
-    return () => {
-      cancelled = true
+    if (stage.name !== 'browsing') return
+    if (browseTab === 'open') void loadEntries()
+    else void loadMyEntries()
+  }, [stage.name, browseTab, loadEntries, loadMyEntries])
+
+  const loadInvite = useCallback(async (entryId: string) => {
+    setStage({ name: 'loading-invite' })
+    try {
+      const res = await fetch(`/api/entries/lookup?entryId=${encodeURIComponent(entryId)}&exclude=${encodeURIComponent(address)}`)
+      const body = await readJsonOrThrow(res, 'Could not load this duel')
+      setStage({ name: 'invite', entry: body.entry as OpenEntry })
     }
-  }, [presetEntryId, address])
+    catch (error) {
+      setStage({ name: 'error', message: errorMessage(error) })
+    }
+  }, [address])
+
+  useEffect(() => {
+    // ChallengeBrowser only mounts once `address` is connected, and
+    // `presetEntryId` is fixed at App's initial render — both are stable
+    // for this component's whole lifetime, so this is only ever meant to
+    // run once, for the link this component was opened with.
+    if (presetEntryId) void loadInvite(presetEntryId)
+  }, [presetEntryId, loadInvite])
+
+  function backToOpenDuels() {
+    setPastedLink('')
+    setPastedLinkError(null)
+    setStage({ name: 'browsing' })
+  }
+
+  async function handleCopyMyEntryLink(entryId: string) {
+    const link = buildDuelDeepLink(entryId)
+    const input = copyFallbackRef.current
+    if (input) input.value = link
+    const copied = await copyText(link, input)
+    setCopiedEntryId(copied ? entryId : null)
+    if (copied) setTimeout(() => setCopiedEntryId((current) => (current === entryId ? null : current)), 1200)
+  }
+
+  // A duel link's clickability depends on whatever app it's shared
+  // through, so pasting the link (or just the code) back in is the
+  // reliable fallback way to reach a private duel.
+  function handleFindDuel() {
+    const entryId = parseDuelEntryId(pastedLink)
+    if (!entryId) {
+      setPastedLinkError("That doesn't look like a duel link or code.")
+      return
+    }
+    setPastedLinkError(null)
+    void loadInvite(entryId)
+  }
 
   async function challenge(entryId: string, creatorAddress: string, stakeTxHash: string) {
     setStage({ name: 'challenging', entryId, creatorAddress, stakeTxHash })
@@ -202,34 +271,108 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   if (stage.name === 'browsing') {
     return (
       <div className="duel-panel">
-        {listError && <p className="address-card-error">{listError}</p>}
-        {entries === null && !listError && <p className="section-note">Loading open duels…</p>}
-        {entries !== null && entries.length === 0 && <p className="section-note">No open duels right now — check back soon.</p>}
-        {entries !== null && entries.length > 0 && (
-          <ul className="entry-list">
-            {entries.map((entry) => (
-              <li key={entry.entryId} className="entry-list-item">
-                <Identicon address={entry.creatorAddress} size={36} />
-                <div className="entry-list-info">
-                  <span className="entry-list-address">{entry.creatorAddress}</span>
-                  <span className="entry-list-meta">
-                    {DIFFICULTY_LABELS[entry.difficulty]} · {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna, entry.creatorAddress)}
-                >
-                  Challenge
-                </button>
-              </li>
-            ))}
-          </ul>
+        <input ref={copyFallbackRef} readOnly className="visually-hidden-input copy-fallback-input" tabIndex={-1} aria-hidden="true" />
+        <div className="find-duel">
+          <input
+            className="find-duel-input share-link-input"
+            placeholder="Paste a private duel link or code"
+            value={pastedLink}
+            onChange={(e) => { setPastedLink(e.target.value); setPastedLinkError(null) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleFindDuel() }}
+          />
+          <button type="button" className="btn btn-secondary" onClick={handleFindDuel} disabled={!pastedLink.trim()}>
+            Find
+          </button>
+        </div>
+        {pastedLinkError && <p className="address-card-error">{pastedLinkError}</p>}
+
+        <div className="visibility-picker">
+          <button
+            type="button"
+            className={`btn btn-toggle ${browseTab === 'open' ? 'btn-toggle-active' : ''}`}
+            onClick={() => setBrowseTab('open')}
+          >
+            Open duels
+          </button>
+          <button
+            type="button"
+            className={`btn btn-toggle ${browseTab === 'mine' ? 'btn-toggle-active' : ''}`}
+            onClick={() => setBrowseTab('mine')}
+          >
+            My duels
+          </button>
+        </div>
+
+        {browseTab === 'open' && (
+          <>
+            {listError && <p className="address-card-error">{listError}</p>}
+            {entries === null && !listError && <p className="section-note">Loading open duels…</p>}
+            {entries !== null && entries.length === 0 && (
+              <EmptyState icon={<OpenIcon />} title="No open duels right now" subtitle="Check back soon, or create one yourself." />
+            )}
+            {entries !== null && entries.length > 0 && (
+              <ul className="entry-list">
+                {entries.map((entry) => (
+                  <li key={entry.entryId} className="entry-list-item">
+                    <Identicon address={entry.creatorAddress} size={36} />
+                    <div className="entry-list-info">
+                      <span className="entry-list-address">{entry.creatorAddress}</span>
+                      <span className="entry-list-meta">
+                        <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void handleChallenge(entry.entryId, entry.stakeLuna, entry.creatorAddress)}
+                    >
+                      Challenge
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button type="button" className="btn btn-secondary" onClick={() => void loadEntries()}>
+              Refresh
+            </button>
+          </>
         )}
-        <button type="button" className="btn btn-secondary" onClick={() => void loadEntries()}>
-          Refresh
-        </button>
+
+        {browseTab === 'mine' && (
+          <>
+            {myEntriesError && <p className="address-card-error">{myEntriesError}</p>}
+            {myEntries === null && !myEntriesError && <p className="section-note">Loading your duels…</p>}
+            {myEntries !== null && myEntries.length === 0 && (
+              <EmptyState icon={<OpenIcon />} title="No duels yet" subtitle="Create one from the Duel tab to see it here." />
+            )}
+            {myEntries !== null && myEntries.length > 0 && (
+              <ul className="entry-list">
+                {myEntries.map((entry) => {
+                  const { label, modifier } = myEntryStatus(entry)
+                  return (
+                    <li key={entry.entryId} className="entry-list-item entry-list-item-column">
+                      <div className="entry-list-info">
+                        <span className="entry-list-meta">
+                          <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                          {entry.visibility === 'PRIVATE' && ' · Private'}
+                        </span>
+                        <span className={`my-entry-status my-entry-status-${modifier}`}>{label}</span>
+                      </div>
+                      {entry.visibility === 'PRIVATE' && entry.status === 'OPEN' && (
+                        <button type="button" className="btn btn-secondary" onClick={() => void handleCopyMyEntryLink(entry.entryId)}>
+                          {copiedEntryId === entry.entryId ? 'Copied!' : 'Copy link'}
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            <button type="button" className="btn btn-secondary" onClick={() => void loadMyEntries()}>
+              Refresh
+            </button>
+          </>
+        )}
       </div>
     )
   }
@@ -249,7 +392,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
             <div className="entry-list-info">
               <span className="entry-list-address">{entry.creatorAddress}</span>
               <span className="entry-list-meta">
-                {DIFFICULTY_LABELS[entry.difficulty]} · {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
               </span>
             </div>
             <button
@@ -261,6 +404,9 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
             </button>
           </li>
         </ul>
+        <button type="button" className="btn btn-secondary" onClick={backToOpenDuels}>
+          Back to open duels
+        </button>
       </div>
     )
   }
@@ -356,7 +502,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
         {reveal.txHashes.map((hash) => (
           <p key={hash} className="reveal-tx">{hash}</p>
         ))}
-        <button type="button" className="btn btn-secondary" onClick={() => setStage({ name: 'browsing' })}>
+        <button type="button" className="btn btn-secondary" onClick={backToOpenDuels}>
           Back to open duels
         </button>
       </div>
@@ -366,7 +512,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   return (
     <div className="duel-panel">
       <p className="address-card-error">{stage.message}</p>
-      <button type="button" className="btn btn-primary" onClick={() => setStage({ name: 'browsing' })}>
+      <button type="button" className="btn btn-primary" onClick={backToOpenDuels}>
         Back to open duels
       </button>
     </div>

@@ -1,6 +1,6 @@
-# Typing Duel — Agent Ground Rules
+# NIMble — Agent Ground Rules
 
-A Nimiq Pay Mini App. Async 1v1 speed-typing duels with NIM stakes, server-refereed
+A Nimiq Pay Mini App. Async 1v1 speed-NIMbles with NIM stakes, server-refereed
 timing, custodial escrow, on-chain payout.
 
 Full phased build plan: [typing-duel-build-plan.md](typing-duel-build-plan.md). Build

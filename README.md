@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⌨️ Typing Duel
+# ⌨️ NIMble
 
 **Stake NIM. Type fast. Winner takes the pot.**
 
@@ -12,7 +12,7 @@ An async 1v1 speed-typing wager, built as a Nimiq Pay Mini App.
 
 ## What it is
 
-Typing Duel is a head-to-head typing game with real stakes. You stake NIM, type
+NIMble is a head-to-head typing game with real stakes. You stake NIM, type
 a paragraph as fast and accurately as you can, and get matched against someone
 else's hidden time. Whoever's faster — measured by the server, not the client —
 wins the pot.

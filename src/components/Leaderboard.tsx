@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { errorMessage, formatLuna, readJsonOrThrow } from '../lib/api'
+import { errorMessage, formatAddressShort, formatLuna, readJsonOrThrow } from '../lib/api'
+import { BoardIcon } from './NavIcons'
+import { EmptyState } from './EmptyState'
 import { Identicon } from './Identicon'
 
 interface LeaderboardEntry {
@@ -30,15 +32,17 @@ export function Leaderboard() {
 
   if (error) return <p className="address-card-error">{error}</p>
   if (entries === null) return <p className="section-note">Loading leaderboard…</p>
-  if (entries.length === 0) return <p className="section-note">No winnings yet — be the first to win a duel.</p>
+  if (entries.length === 0) {
+    return <EmptyState icon={<BoardIcon />} title="No winners yet" subtitle="Be the first to win a duel and claim the top spot." />
+  }
 
   return (
     <ol className="leaderboard-list">
       {entries.map((entry) => (
-        <li key={entry.nimAddress} className="leaderboard-row">
-          <span className={`leaderboard-rank ${entry.rank <= 3 ? `leaderboard-rank-${entry.rank}` : ''}`}>#{entry.rank}</span>
+        <li key={entry.nimAddress} className={`leaderboard-row ${entry.rank <= 3 ? `leaderboard-row-${entry.rank}` : ''}`}>
+          <span className={`leaderboard-medal ${entry.rank <= 3 ? `leaderboard-medal-${entry.rank}` : ''}`}>{entry.rank}</span>
           <Identicon address={entry.nimAddress} size={28} />
-          <span className="leaderboard-address">{entry.nimAddress}</span>
+          <span className="leaderboard-address" title={entry.nimAddress}>{formatAddressShort(entry.nimAddress)}</span>
           <span className="leaderboard-stats">
             <span className="leaderboard-winnings">{formatLuna(entry.totalWonLuna)}</span>
             <span className="leaderboard-wins">{entry.wins} win{entry.wins === 1 ? '' : 's'}</span>

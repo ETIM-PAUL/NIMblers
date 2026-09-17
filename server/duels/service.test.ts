@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { challengeEntry, declineRetry, getEntryForChallenge, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
+import { challengeEntry, declineRetry, getEntryForChallenge, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -167,6 +167,40 @@ test('getEntryForChallenge rejects an entry past its 24h window', () => {
   db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
   const result = getEntryForChallenge(db, entryId)
   assert.equal(result.ok, false)
+})
+
+test('listMyEntries returns the creator\'s own entry, regardless of visibility', () => {
+  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  assert.equal(mine.length, 1)
+  assert.equal(mine[0].entryId, entryId)
+  assert.equal(mine[0].status, 'OPEN')
+  assert.equal(mine[0].visibility, 'PRIVATE')
+  assert.equal(mine[0].challengerAddress, null)
+  assert.equal(mine[0].outcome, null)
+})
+
+test('listMyEntries returns nothing for someone who has not created any entries', () => {
+  assert.deepEqual(listMyEntries(db, CHALLENGER_ADDRESS), [])
+})
+
+test('listMyEntries shows the challenger once the entry is locked, before settlement', async () => {
+  await challengeEntry(db, fakeWallet(), { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'challenger-tx' })
+  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  assert.equal(mine[0].status, 'LOCKED')
+  assert.equal(mine[0].challengerAddress, CHALLENGER_ADDRESS)
+  assert.equal(mine[0].outcome, null, 'not settled yet')
+})
+
+test('listMyEntries reports the outcome from the creator\'s perspective once settled', async () => {
+  const wallet = fakeSettlingWallet()
+  await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'challenger-tx' })
+  // The challenger's slower run loses — the creator (seeded at 5000ms) wins.
+  await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
+
+  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  assert.equal(mine[0].status, 'SETTLED')
+  assert.equal(mine[0].outcome, 'creator')
 })
 
 test('a PRIVATE entry can still be challenged and settled through the normal flow', async () => {

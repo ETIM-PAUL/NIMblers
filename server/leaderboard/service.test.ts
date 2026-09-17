@@ -5,7 +5,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { getLeaderboard } from './service.ts'
+import { DEFAULT_LEADERBOARD_LIMIT, getLeaderboard, startOfWeekUtc } from './service.ts'
 
 process.env.DB_PATH = ':memory:'
 
@@ -15,12 +15,17 @@ const CAROL = 'NQ07 CARO LAAA AAAA AAAA AAAA AAAA AAAA AAAA'
 
 let db: DatabaseSync
 
-function insertPayout(userId: string, type: 'PAYOUT' | 'REFUND' | 'STAKE_RECEIVED', amountLuna: number, options: { fulfilled?: boolean } = {}): void {
+function insertPayout(
+  userId: string,
+  type: 'PAYOUT' | 'REFUND' | 'STAKE_RECEIVED',
+  amountLuna: number,
+  options: { fulfilled?: boolean, createdAt?: string } = {},
+): void {
   const fulfilled = options.fulfilled ?? true
   db.prepare(
     `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(randomUUID(), randomUUID(), userId, type, amountLuna, fulfilled ? `tx-${randomUUID()}` : null, new Date().toISOString())
+  ).run(randomUUID(), randomUUID(), userId, type, amountLuna, fulfilled ? `tx-${randomUUID()}` : null, options.createdAt ?? new Date().toISOString())
 }
 
 beforeEach(() => {
@@ -91,4 +96,39 @@ test('respects the limit', () => {
 
 test('an empty leaderboard is an empty array, not an error', () => {
   assert.deepEqual(getLeaderboard(db), [])
+})
+
+// --- Weekly reset ---
+
+test('startOfWeekUtc finds Monday 00:00:00 UTC for any day in that week', () => {
+  const monday = '2026-01-05T00:00:00.000Z'
+  assert.equal(startOfWeekUtc(new Date('2026-01-07T15:30:00Z')).toISOString(), monday, 'a midweek Wednesday')
+  assert.equal(startOfWeekUtc(new Date('2026-01-11T23:59:59Z')).toISOString(), monday, 'the last instant of Sunday, still the same week')
+  assert.equal(startOfWeekUtc(new Date(monday)).toISOString(), monday, 'Monday itself, already at the reset instant')
+})
+
+test('startOfWeekUtc rolls over to the next Monday right after Sunday 23:59:59 UTC', () => {
+  assert.equal(startOfWeekUtc(new Date('2026-01-12T00:00:00.000Z')).toISOString(), '2026-01-12T00:00:00.000Z')
+})
+
+test('getLeaderboard only counts winnings from the current week — last week\'s wins have already reset off the board', () => {
+  const alice = getOrCreateUser(db, ALICE)
+  const now = new Date('2026-01-07T12:00:00Z') // a Wednesday
+  insertPayout(alice, 'PAYOUT', 500_000, { createdAt: '2026-01-04T23:59:59.000Z' }) // last week (Sunday, just before reset)
+  insertPayout(alice, 'PAYOUT', 100_000, { createdAt: '2026-01-05T00:00:00.000Z' }) // this week (Monday, right at reset)
+
+  const board = getLeaderboard(db, DEFAULT_LEADERBOARD_LIMIT, now)
+
+  assert.equal(board.length, 1)
+  assert.equal(board[0].totalWonLuna, 100_000, 'only this week\'s win should count')
+  assert.equal(board[0].wins, 1)
+})
+
+test('getLeaderboard drops a player entirely once all their wins are from a prior week', () => {
+  const alice = getOrCreateUser(db, ALICE)
+  insertPayout(alice, 'PAYOUT', 500_000, { createdAt: '2026-01-04T12:00:00.000Z' })
+
+  const board = getLeaderboard(db, DEFAULT_LEADERBOARD_LIMIT, new Date('2026-01-07T12:00:00Z'))
+
+  assert.deepEqual(board, [])
 })

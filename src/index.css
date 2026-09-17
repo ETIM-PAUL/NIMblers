@@ -404,6 +404,23 @@ button {
   color: var(--text);
 }
 
+/* A real action (Copy link, Find) that isn't the screen's primary CTA but
+   still needs to read as clearly tappable — .btn-secondary's flat neutral
+   gray is deliberately muted for de-emphasized actions (Back, Refresh) and
+   disappears against a white/dark card, which is the wrong amount of
+   quiet here. */
+.btn-tinted {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.btn-tinted:disabled {
+  background: var(--neutral-bg);
+  color: var(--text-faint);
+  border-color: transparent;
+}
+
 .btn-rematch {
   width: 100%;
   display: flex;
@@ -680,6 +697,64 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* Result banner — the "game over" moment */
+
+.result-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 22px 16px;
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.result-banner-won {
+  background: var(--duel-grad);
+  box-shadow: var(--shadow-glow);
+  color: #fff;
+}
+
+.result-banner-lost {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.result-banner-tied {
+  background: var(--neutral-bg);
+  color: var(--text);
+}
+
+.result-banner-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.result-banner-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.result-banner-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.result-banner-subtitle {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
 .reveal-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -695,7 +770,19 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
+}
+
+.reveal-row-winner {
+  background: var(--accent-soft);
+}
+
+.reveal-row-delta {
+  border-top: 1px dashed var(--border);
+  margin-top: 2px;
+  padding-top: 8px;
 }
 
 .reveal-who {
@@ -706,6 +793,11 @@ button {
 
 .reveal-row span:first-child {
   color: var(--text-dim);
+}
+
+.reveal-row-winner span:first-child {
+  color: var(--accent-dark);
+  font-weight: 600;
 }
 
 .reveal-row span:last-child {

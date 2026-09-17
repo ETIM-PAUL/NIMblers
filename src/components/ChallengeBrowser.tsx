@@ -8,7 +8,7 @@ import { buildExplorerTxLink } from '../lib/explorer'
 import { DifficultyChip } from './DifficultyChip'
 import { EmptyState } from './EmptyState'
 import { Identicon } from './Identicon'
-import { OpenIcon } from './NavIcons'
+import { BoardIcon, OpenIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
 
 interface Props {
@@ -277,7 +277,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
             onChange={(e) => { setPastedLink(e.target.value); setPastedLinkError(null) }}
             onKeyDown={(e) => { if (e.key === 'Enter') handleFindDuel() }}
           />
-          <button type="button" className="btn btn-secondary" onClick={handleFindDuel} disabled={!pastedLink.trim()}>
+          <button type="button" className="btn btn-tinted" onClick={handleFindDuel} disabled={!pastedLink.trim()}>
             Find
           </button>
         </div>
@@ -347,7 +347,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                 {myEntries.map((entry) => {
                   const { label, modifier } = myEntryStatus(entry)
                   return (
-                    <li key={entry.entryId} className="entry-list-item entry-list-item-column">
+                    <li key={entry.entryId} className="entry-list-item">
                       <div className="entry-list-info">
                         <span className="entry-list-meta">
                           <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
@@ -356,7 +356,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                         <span className={`my-entry-status my-entry-status-${modifier}`}>{label}</span>
                       </div>
                       {entry.visibility === 'PRIVATE' && entry.status === 'OPEN' && (
-                        <button type="button" className="btn btn-secondary" onClick={() => void handleCopyMyEntryLink(entry.entryId)}>
+                        <button type="button" className="btn btn-tinted" onClick={() => void handleCopyMyEntryLink(entry.entryId)}>
                           {copiedEntryId === entry.entryId ? 'Copied!' : 'Copy link'}
                         </button>
                       )}
@@ -474,24 +474,31 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   if (stage.name === 'settled') {
     const { reveal, creatorAddress } = stage
     const youWon = reveal.outcome === 'challenger'
-    const headline = reveal.outcome === 'tie'
-      ? "It's a tie — both stakes refunded in full."
+    const tied = reveal.outcome === 'tie'
+    const modifier = tied ? 'tied' : youWon ? 'won' : 'lost'
+    const headline = tied ? "It's a tie" : youWon ? 'You won!' : 'You lost'
+    const subline = tied
+      ? 'Both stakes refunded in full.'
       : youWon
-        ? 'You won!'
-        : 'You lost this one.'
+        ? `Faster by ${formatSeconds(reveal.deltaMs)} — pot's on its way to you.`
+        : `Slower by ${formatSeconds(reveal.deltaMs)} — better luck on the next one.`
     return (
       <div className="duel-panel">
-        <p className={reveal.outcome === 'challenger' ? 'section-note-best' : 'section-note'}>{headline}</p>
+        <div className={`result-banner result-banner-${modifier}`}>
+          {modifier === 'won' && <span className="result-banner-icon"><BoardIcon /></span>}
+          <p className="result-banner-title">{headline}</p>
+          <p className="result-banner-subtitle">{subline}</p>
+        </div>
         <div className="reveal-card">
-          <div className="reveal-row">
+          <div className={`reveal-row ${!tied && !youWon ? 'reveal-row-winner' : ''}`}>
             <span className="reveal-who"><Identicon address={creatorAddress} size={24} /> Opponent</span>
             <span>{formatSeconds(reveal.creatorDurationMs)}</span>
           </div>
-          <div className="reveal-row">
+          <div className={`reveal-row ${!tied && youWon ? 'reveal-row-winner' : ''}`}>
             <span className="reveal-who"><Identicon address={address} size={24} /> You</span>
             <span>{formatSeconds(reveal.challengerDurationMs)}</span>
           </div>
-          <div className="reveal-row">
+          <div className="reveal-row reveal-row-delta">
             <span>Delta</span>
             <span>{formatSeconds(reveal.deltaMs)}</span>
           </div>

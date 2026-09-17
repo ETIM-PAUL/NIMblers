@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import type { Difficulty, HouseAddressInfo, Visibility } from '../lib/api'
-import { buildDuelDeepLink, DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, formatLuna, readJsonOrThrow } from '../lib/api'
+import type { Difficulty, HouseAddressInfo, MyEntry, Visibility } from '../lib/api'
+import { buildDuelDeepLink, DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, fetchMyEntries, formatLuna, readJsonOrThrow } from '../lib/api'
 import { copyText } from '../lib/clipboard'
-import { EasyIcon, HardIcon, MediumIcon } from './NavIcons'
+import { BoardIcon, EasyIcon, HardIcon, MediumIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
+
+/** How often to check whether a challenger has taken/settled this entry while its creator is sitting on the waiting screen. */
+const WAITING_POLL_MS = 8_000
 
 const DIFFICULTY_ICONS: Record<Difficulty, React.ReactNode> = { easy: <EasyIcon />, medium: <MediumIcon />, hard: <HardIcon /> }
 
@@ -28,6 +31,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
   const [allowRematch, setAllowRematch] = useState(false)
   const [houseInfo, setHouseInfo] = useState<HouseAddressInfo | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [resolvedEntry, setResolvedEntry] = useState<MyEntry | null>(null)
   const linkInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -36,6 +40,44 @@ export function DuelPanel({ address, sendPayment }: Props) {
       // fetches this again anyway and surfaces any real error there.
     })
   }, [])
+
+  // The waiting screen is otherwise frozen the instant it's shown: nothing
+  // else re-fetches once a challenger takes the entry, so without this, a
+  // creator who stays on this screen (or just switches tabs and back)
+  // keeps seeing "waiting" and a live copy-link long after the duel has
+  // actually been played and settled elsewhere — the exact same duel then
+  // disagreeing with itself between this screen and My Duels/History.
+  const waitingEntryId = stage.name === 'waiting' ? stage.entryId : null
+  useEffect(() => {
+    if (waitingEntryId === null) {
+      setResolvedEntry(null)
+      return
+    }
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    async function poll() {
+      try {
+        const entries = await fetchMyEntries(address)
+        const mine = entries.find((e) => e.entryId === waitingEntryId)
+        if (cancelled) return
+        if (mine && mine.status !== 'OPEN') {
+          setResolvedEntry(mine)
+          return // reached a terminal state — stop polling
+        }
+      }
+      catch {
+        // Transient network hiccup — the next tick will just try again.
+      }
+      if (!cancelled) timeoutId = setTimeout(() => void poll(), WAITING_POLL_MS)
+    }
+
+    timeoutId = setTimeout(() => void poll(), WAITING_POLL_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [waitingEntryId, address])
 
   async function revealParagraph(difficulty: Difficulty, stakeTxHash: string) {
     setStage({ name: 'revealing', difficulty, stakeTxHash })
@@ -167,6 +209,47 @@ export function DuelPanel({ address, sendPayment }: Props) {
   }
 
   if (stage.name === 'waiting') {
+    if (resolvedEntry && resolvedEntry.status === 'LOCKED') {
+      return (
+        <div className="duel-panel">
+          <p className="section-note-best">Someone's playing your duel now.</p>
+          <p className="section-note">Check back soon to see who won.</p>
+          <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
+            Create another duel
+          </button>
+        </div>
+      )
+    }
+    if (resolvedEntry && resolvedEntry.status === 'EXPIRED') {
+      return (
+        <div className="duel-panel">
+          <div className="result-banner result-banner-tied">
+            <p className="result-banner-title">Expired</p>
+            <p className="result-banner-subtitle">Nobody challenged it in time — your stake was refunded.</p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
+            Create another duel
+          </button>
+        </div>
+      )
+    }
+    if (resolvedEntry && resolvedEntry.status === 'SETTLED') {
+      const modifier = resolvedEntry.outcome === 'creator' ? 'won' : resolvedEntry.outcome === 'challenger' ? 'lost' : 'tied'
+      const title = modifier === 'won' ? 'You won!' : modifier === 'lost' ? 'You lost' : "It's a tie"
+      const subtitle = modifier === 'tied' ? 'Both stakes refunded in full.' : 'See the full result, including both times, in History.'
+      return (
+        <div className="duel-panel">
+          <div className={`result-banner result-banner-${modifier}`}>
+            {modifier === 'won' && <span className="result-banner-icon"><BoardIcon /></span>}
+            <p className="result-banner-title">{title}</p>
+            <p className="result-banner-subtitle">{subtitle}</p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
+            Create another duel
+          </button>
+        </div>
+      )
+    }
     if (stage.visibility === 'PRIVATE') {
       const link = buildDuelDeepLink(stage.entryId)
       return (

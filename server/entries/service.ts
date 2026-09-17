@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Difficulty, EntryStatus, EntryVisibility } from '../db/types.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { getDailyParagraphForToday } from '../paragraphs/repository.ts'
+import { getOrGenerateParagraphForStake } from '../paragraphs/repository.ts'
 import { submitRun } from '../runs/service.ts'
 import { DEFAULT_ENTRY_TTL_MS } from '../duels/stateMachine.ts'
 import type { KeystrokeEvent } from '../../shared/timingEngine.ts'
@@ -48,10 +48,12 @@ export type RevealResult =
 /**
  * The "stake first" half of Player A's flow: independently verifies the
  * stake transaction on-chain for the amount this difficulty tier requires,
- * then — and only then — reveals that tier's daily paragraph. Calling this
- * again with the same `stakeTxHash` is safe and cheap: the stake was
- * already verified, so `receiveStake` returns the existing ledger row
- * without touching the chain a second time.
+ * then — and only then — generates a fresh paragraph for that tier (see
+ * server/paragraphs/generator.ts) and ties it to this specific stake.
+ * Calling this again with the same `stakeTxHash` is safe and cheap: the
+ * stake was already verified, so `receiveStake` returns the existing
+ * ledger row without touching the chain a second time, and the same
+ * already-generated paragraph is returned rather than a new one.
  */
 export async function revealEntry(
   db: DatabaseSync,
@@ -66,7 +68,7 @@ export async function revealEntry(
   })
   if (!stake.ok) return stake
 
-  const paragraph = getDailyParagraphForToday(db, input.difficulty)
+  const paragraph = getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
   return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
 }
 
@@ -76,10 +78,10 @@ export type CreateEntryResult =
 
 /**
  * The "submit" half: re-confirms the stake (idempotent — a no-op if
- * `revealEntry` already verified it), independently re-derives today's
- * daily paragraph for the claimed difficulty — never trusts a
+ * `revealEntry` already verified it), independently re-derives the
+ * paragraph that was generated for this specific stake — never trusts a
  * client-supplied paragraph id, which would let someone submit a run
- * against an easier practice paragraph and claim it was the daily one —
+ * against an easier practice paragraph and claim it was this one —
  * validates the run through the same replay and integrity pipeline every
  * run goes through, and only then creates the OPEN entry at that tier's
  * stake amount.
@@ -136,7 +138,7 @@ export async function createEntry(
   const stake = await confirmStake(db, wallet, userId, { ...input, valueLuna: stakeLuna })
   if (!stake.ok) return stake
 
-  const paragraph = getDailyParagraphForToday(db, input.difficulty)
+  const paragraph = getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
   const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: paragraph.id, events: input.events })
   if (!runResult.ok) {
     return { ok: false, reason: runResult.reason }

@@ -38,10 +38,13 @@ all without leaving the app you already have open.
 ## How a duel works
 
 1. **Pick a level, then stake.** Easy is 1 NIM, Medium is 3, Hard is 5 — each
-   tier has its own daily paragraph, so a harder duel is a harder paragraph,
-   not just a bigger number. The paragraph is revealed only after the stake
-   is independently confirmed on-chain, for that exact tier's amount — never
-   because a client claims it happened. There's no "changed my mind" undo:
+   tier gets a paragraph generated fresh from word banks at reveal time
+   (`server/paragraphs/generator.ts`), tuned harder by longer words and more
+   punctuation, not just a bigger number. Nobody — not even the creator —
+   can know the text before staking: it doesn't exist yet. The paragraph is
+   revealed only after the stake is independently confirmed on-chain, for
+   that exact tier's amount — never because a client claims it happened.
+   There's no "changed my mind" undo:
    closing the tab before finishing forfeits the stake rather than refunding
    it, which is what keeps stake-then-abandon from being a free way to grief
    the house wallet. A fully submitted entry that nobody ever challenges
@@ -266,7 +269,7 @@ src/                React app — UI, wallet connection, typing engine
 shared/             Typing + timing replay logic used by both client and server
 server/
   db/               Schema, migrations, seed data
-  paragraphs/       Deterministic daily paragraph + practice-pool logic
+  paragraphs/       Fresh-per-duel paragraph generation + practice-pool logic
   runs/             POST /api/runs — server-side keystroke replay and validation
   duels/            Pure state machine, Player B's flow (browse, challenge, submit,
                     settle), and the expiry/refund sweep

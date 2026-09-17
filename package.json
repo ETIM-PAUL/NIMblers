@@ -18,6 +18,7 @@
     "test": "NODE_ENV=test node --experimental-strip-types --test server/**/*.test.ts services/**/*.test.ts shared/**/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {
+    "@faker-js/faker": "^10.6.0",
     "@nimiq/core": "^2.21.0",
     "@nimiq/identicons": "^1.6.2",
     "@nimiq/mini-app-sdk": "^0.1.0",

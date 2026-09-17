@@ -4,8 +4,6 @@ import type { AddressInfo } from 'node:net'
 import type { Server } from 'node:http'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
-import { getDailyParagraphForToday } from '../paragraphs/repository.ts'
-import { PARAGRAPH_POOL } from '../paragraphs/pool-data.ts'
 import { createRouter } from '../http/router.ts'
 import { registerEntryRoutes } from './httpServer.ts'
 import { setHouseWalletFactoryForTesting, setHouseWalletForTesting } from './houseWallet.ts'
@@ -47,9 +45,6 @@ let baseUrl: string
 before(async () => {
   closeDb()
   migrateUp()
-  const insert = getDb().prepare('INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)')
-  const now = new Date().toISOString()
-  for (const p of PARAGRAPH_POOL) insert.run(p.id, p.body, p.difficulty, now)
 
   const router = createRouter()
   registerEntryRoutes(router)
@@ -75,6 +70,21 @@ function assertNoDurationLeak(responseText: string): void {
   )
 }
 
+/** Reveals over HTTP and returns the paragraph actually shown — the only way to know it in advance, by design. */
+async function revealViaHttp(stakeTxHash: string, difficulty: string): Promise<{ paragraphId: string, paragraphBody: string }> {
+  const res = await fetch(`${baseUrl}/api/entries/reveal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash, difficulty }),
+  })
+  assert.equal(res.status, 200, 'setup: reveal must succeed')
+  return (await res.json()) as { paragraphId: string, paragraphBody: string }
+}
+
+function eventsFor(body: string): { key: string, tRelativeMs: number, resultingLength: number }[] {
+  return body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+}
+
 test('GET /api/house-address returns the wallet address and the stake amount per difficulty', async () => {
   const res = await fetch(`${baseUrl}/api/house-address`)
   assert.equal(res.status, 200)
@@ -83,7 +93,7 @@ test('GET /api/house-address returns the wallet address and the stake amount per
   assert.deepEqual(body.stakes, DUEL_STAKE_LUNA_BY_DIFFICULTY)
 })
 
-test('POST /api/entries/reveal verifies the stake and reveals today\'s paragraph for that difficulty, with no timing data', async () => {
+test('POST /api/entries/reveal verifies the stake and reveals a freshly generated paragraph for that difficulty, with no timing data', async () => {
   const res = await fetch(`${baseUrl}/api/entries/reveal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -94,9 +104,8 @@ test('POST /api/entries/reveal verifies the stake and reveals today\'s paragraph
   assertNoDurationLeak(text)
 
   const body = JSON.parse(text) as { paragraphId: string, paragraphBody: string }
-  const today = getDailyParagraphForToday(getDb(), 'easy')
-  assert.equal(body.paragraphId, today.id)
-  assert.equal(body.paragraphBody, today.body)
+  assert.ok(body.paragraphId)
+  assert.ok(body.paragraphBody.length > 0)
 })
 
 test('POST /api/entries/reveal rejects an unverifiable stake', async () => {
@@ -124,8 +133,8 @@ test('POST /api/entries creates an OPEN entry at the difficulty\'s stake amount,
       return confirmedStakeTx({ txHash, valueLuna: DUEL_STAKE_LUNA_BY_DIFFICULTY.hard })
     },
   })
-  const today = getDailyParagraphForToday(getDb(), 'hard')
-  const events = today.body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+  const revealed = await revealViaHttp('stake-tx-hard', 'hard')
+  const events = eventsFor(revealed.paragraphBody)
 
   const res = await fetch(`${baseUrl}/api/entries`, {
     method: 'POST',
@@ -155,8 +164,8 @@ test('POST /api/entries creates an OPEN entry at the difficulty\'s stake amount,
 })
 
 test('POST /api/entries stores PRIVATE when asked, and rejects a bogus visibility value', async () => {
-  const today = getDailyParagraphForToday(getDb(), 'easy')
-  const events = today.body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+  const revealed = await revealViaHttp('stake-tx-private', 'easy')
+  const events = eventsFor(revealed.paragraphBody)
 
   const privateRes = await fetch(`${baseUrl}/api/entries`, {
     method: 'POST',
@@ -167,17 +176,18 @@ test('POST /api/entries stores PRIVATE when asked, and rejects a bogus visibilit
   const privateBody = (await privateRes.json()) as { visibility: string }
   assert.equal(privateBody.visibility, 'PRIVATE')
 
+  const bogusEvents = eventsFor((await revealViaHttp('stake-tx-bogus', 'easy')).paragraphBody)
   const bogusRes = await fetch(`${baseUrl}/api/entries`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-bogus', difficulty: 'easy', events, visibility: 'SECRET' }),
+    body: JSON.stringify({ nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-bogus', difficulty: 'easy', events: bogusEvents, visibility: 'SECRET' }),
   })
   assert.equal(bogusRes.status, 400)
 })
 
 test('POST /api/entries with a tampered run is rejected, with no timing data in the error response either', async () => {
-  const today = getDailyParagraphForToday(getDb(), 'easy')
-  const events = today.body.split('').map((char, i) => ({ key: char, tRelativeMs: i * 100, resultingLength: i + 1 }))
+  const revealed = await revealViaHttp('stake-tx-tampered', 'easy')
+  const events = eventsFor(revealed.paragraphBody)
   events[2] = { ...events[2], tRelativeMs: events[1].tRelativeMs - 5 } // edited timestamp
 
   const res = await fetch(`${baseUrl}/api/entries`, {

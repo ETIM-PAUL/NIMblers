@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: nimblers
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build && npm run db:migrate
+    startCommand: npm run server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render's free tier has no cron-job option, so the expiry sweep runs
+      # as an in-process interval instead — see server/index.ts.
+      - key: ENABLE_INPROCESS_SWEEP
+        value: "true"
+      # Secrets — set these manually in the Render dashboard (Environment
+      # tab) after the first deploy. Never commit real values; see
+      # .env.example for what each one is.
+      - key: ESCROW_PRIVATE_KEY
+        sync: false
+      - key: NIMIQ_RPC_URL
+        sync: false
+      - key: NIMIQ_RPC_USERNAME
+        sync: false
+      - key: NIMIQ_RPC_PASSWORD
+        sync: false

@@ -21,8 +21,8 @@ function requireEnv(name: string): string {
 
 async function main() {
   process.env.DB_PATH ??= 'server/db/data.sqlite'
-  migrateUp()
-  const db = getDb()
+  await migrateUp()
+  const db = await getDb()
 
   const wallet = await createHouseWallet({
     privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY'),

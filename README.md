@@ -179,8 +179,11 @@ the Nimiq ecosystem already shows for it — nothing here invents its own
 avatar scheme that would look out of place next to a real Nimiq wallet.
 - **API:** Node's built-in `http` module — no routing framework dependency for
 the handful of routes there are so far
-- **Data:** SQLite via Node's built-in `node:sqlite` — the entire data layer
-ships with zero extra dependencies
+- **Data:** SQLite locally (via `@libsql/client`, which also speaks plain
+SQLite files) for dev and tests, a hosted [Turso](https://turso.tech)
+database in production — Render's free tier has no persistent disk, so a
+local file there would get wiped on every restart. Same schema, same
+queries, either way — only the connection target changes
 - **Tests:** Node's built-in test runner — no test framework dependency either
 - **Shared core:** the exact same replay logic the typing UI uses to build a
 keystroke stream is what the server uses to independently re-verify it — one
@@ -193,10 +196,11 @@ sequences, checked after every single step, confirm a duel can never
 settle twice, never owe more than the two stakes actually in its pot, and
 never end up in a terminal state with no one entitled to the money
 - **No double-challenge race:** when two people try to challenge the same
-entry at once, the lock is a single conditional SQL `UPDATE ... WHERE status = 'OPEN'` with nothing async before it — SQLite is single-threaded,
-so the two requests literally cannot both see the entry as open. One
-locks it and gets the paragraph; the other gets a clean rejection,
-verified with real concurrent HTTP requests, not just sequential calls
+entry at once, the lock is a single conditional SQL `UPDATE ... WHERE status = 'OPEN'` — the database evaluates the `WHERE` and applies the write as
+one atomic operation, so the two requests can't both affect the row. One
+locks it and gets the paragraph; the other affects zero rows and gets a
+clean rejection, verified with real concurrent HTTP requests, not just
+sequential calls
 - **Escrow:** custodial by necessity. Nimiq has no general smart contracts —
 only basic, vesting, and HTLC accounts, and an HTLC's recipient is fixed at
 creation — so a duel's stake can't sit in a trustless on-chain contract

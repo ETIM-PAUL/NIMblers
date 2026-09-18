@@ -29,3 +29,12 @@ services:
         sync: false
       - key: NIMIQ_RPC_PASSWORD
         sync: false
+      # Render's free plan has no persistent disk — anything written to
+      # server/db/data.sqlite is wiped on every restart/redeploy, including
+      # the free-tier idle-instance respawn. TURSO_DATABASE_URL (and its
+      # auth token) point server/db/client.ts at a hosted libSQL database
+      # instead, so duel/leaderboard/history data actually survives.
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

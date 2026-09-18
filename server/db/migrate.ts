@@ -12,8 +12,9 @@ function listMigrations(): string[] {
     .sort()
 }
 
-function ensureMigrationsTable(): void {
-  getDb().exec(`
+async function ensureMigrationsTable(): Promise<void> {
+  const db = await getDb()
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (
       name TEXT PRIMARY KEY,
       applied_at TEXT NOT NULL
@@ -21,9 +22,10 @@ function ensureMigrationsTable(): void {
   `)
 }
 
-function appliedMigrations(): Set<string> {
-  ensureMigrationsTable()
-  const rows = getDb().prepare('SELECT name FROM _migrations').all() as { name: string }[]
+async function appliedMigrations(): Promise<Set<string>> {
+  await ensureMigrationsTable()
+  const db = await getDb()
+  const rows = (await db.execute('SELECT name FROM _migrations')).rows as unknown as { name: string }[]
   return new Set(rows.map((row) => row.name))
 }
 
@@ -31,54 +33,54 @@ function readSql(name: string, direction: 'up' | 'down'): string {
   return readFileSync(join(MIGRATIONS_DIR, name, `${direction}.sql`), 'utf-8')
 }
 
-export function migrateUp(): string[] {
-  ensureMigrationsTable()
-  const applied = appliedMigrations()
+export async function migrateUp(): Promise<string[]> {
+  await ensureMigrationsTable()
+  const applied = await appliedMigrations()
   const pending = listMigrations().filter((name) => !applied.has(name))
-  const db = getDb()
+  const db = await getDb()
 
   for (const name of pending) {
-    db.exec(readSql(name, 'up'))
-    db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(
-      name,
-      new Date().toISOString(),
-    )
+    await db.executeMultiple(readSql(name, 'up'))
+    await db.execute({
+      sql: 'INSERT INTO _migrations (name, applied_at) VALUES (?, ?)',
+      args: [name, new Date().toISOString()],
+    })
   }
   return pending
 }
 
-export function migrateDown(steps = 1): string[] {
-  ensureMigrationsTable()
-  const applied = [...appliedMigrations()].sort()
+export async function migrateDown(steps = 1): Promise<string[]> {
+  await ensureMigrationsTable()
+  const applied = [...(await appliedMigrations())].sort()
   const toRevert = applied.slice(-steps).reverse()
-  const db = getDb()
+  const db = await getDb()
 
   for (const name of toRevert) {
-    db.exec(readSql(name, 'down'))
-    db.prepare('DELETE FROM _migrations WHERE name = ?').run(name)
+    await db.executeMultiple(readSql(name, 'down'))
+    await db.execute({ sql: 'DELETE FROM _migrations WHERE name = ?', args: [name] })
   }
   return toRevert
 }
 
-export function migrationStatus(): { name: string, applied: boolean }[] {
-  const applied = appliedMigrations()
+export async function migrationStatus(): Promise<{ name: string, applied: boolean }[]> {
+  const applied = await appliedMigrations()
   return listMigrations().map((name) => ({ name, applied: applied.has(name) }))
 }
 
-function main() {
+async function main() {
   const [, , command, arg] = process.argv
 
   if (command === 'up') {
-    const applied = migrateUp()
+    const applied = await migrateUp()
     console.log(applied.length ? `Applied: ${applied.join(', ')}` : 'Already up to date.')
   }
   else if (command === 'down') {
     const steps = arg ? Number(arg) : 1
-    const reverted = migrateDown(steps)
+    const reverted = await migrateDown(steps)
     console.log(reverted.length ? `Reverted: ${reverted.join(', ')}` : 'Nothing to revert.')
   }
   else if (command === 'status') {
-    for (const { name, applied } of migrationStatus()) {
+    for (const { name, applied } of await migrationStatus()) {
       console.log(`${applied ? '[x]' : '[ ]'} ${name}`)
     }
   }

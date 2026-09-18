@@ -40,8 +40,8 @@ async function waitForConfirmation(
 
 async function main() {
   process.env.DB_PATH ??= 'server/db/data.sqlite'
-  migrateUp()
-  const db = getDb()
+  await migrateUp()
+  const db = await getDb()
 
   const wallet = await createHouseWallet({
     privateKeyHex: requireEnv('ESCROW_PRIVATE_KEY'),
@@ -61,11 +61,10 @@ async function main() {
   }
 
   const userId = randomUUID()
-  db.prepare('INSERT INTO users (id, nim_address, created_at) VALUES (?, ?, ?)').run(
-    userId,
-    wallet.address,
-    new Date().toISOString(),
-  )
+  await db.execute({
+    sql: 'INSERT INTO users (id, nim_address, created_at) VALUES (?, ?, ?)',
+    args: [userId, wallet.address, new Date().toISOString()],
+  })
 
   console.log(`\n--- Stake ---`)
   console.log(`Sending ${STAKE_LUNA} Luna from the house wallet to itself (simulating a player's stake)...`)

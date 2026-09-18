@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { beforeEach, test } from 'node:test'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../server/db/client.ts'
 import { closeDb, getDb } from '../server/db/client.ts'
 import { migrateUp } from '../server/db/migrate.ts'
 import { getBalance, payout, receiveStake, refund } from './escrow.ts'
@@ -42,19 +42,18 @@ function createFakeWallet(overrides: Partial<HouseWallet> = {}): HouseWallet & {
   return Object.assign({ ...base, ...overrides }, { sentCalls })
 }
 
-let db: DatabaseSync
+let db: Db
 let userId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   closeDb()
-  migrateUp()
-  db = getDb()
+  await migrateUp()
+  db = await getDb()
   userId = randomUUID()
-  db.prepare('INSERT INTO users (id, nim_address, created_at) VALUES (?, ?, ?)').run(
-    userId,
-    PLAYER_ADDRESS,
-    new Date().toISOString(),
-  )
+  await db.execute({
+    sql: 'INSERT INTO users (id, nim_address, created_at) VALUES (?, ?, ?)',
+    args: [userId, PLAYER_ADDRESS, new Date().toISOString()],
+  })
 })
 
 test('getBalance delegates to the wallet', async () => {
@@ -76,7 +75,8 @@ test('payout sends once and persists a PAYOUT row', async () => {
   assert.ok(record.txHash)
   assert.equal(wallet.sentCalls.length, 1)
 
-  const row = db.prepare('SELECT * FROM payouts WHERE id = ?').get(record.id) as { type: string, tx_hash: string }
+  const row = (await db.execute({ sql: 'SELECT * FROM payouts WHERE id = ?', args: [record.id] }))
+    .rows[0] as unknown as { type: string, tx_hash: string }
   assert.equal(row.type, 'PAYOUT')
   assert.equal(row.tx_hash, record.txHash)
 })
@@ -91,7 +91,8 @@ test('calling payout twice with the same idempotency key pays once', async () =>
   assert.deepEqual(first, second)
   assert.equal(wallet.sentCalls.length, 1, 'the wallet should only ever be asked to send once')
 
-  const count = db.prepare('SELECT COUNT(*) c FROM payouts WHERE idempotency_key = ?').get('same-key') as { c: number }
+  const count = (await db.execute({ sql: 'SELECT COUNT(*) c FROM payouts WHERE idempotency_key = ?', args: ['same-key'] }))
+    .rows[0] as unknown as { c: number }
   assert.equal(count.c, 1)
 })
 
@@ -117,10 +118,11 @@ test('refund behaves like payout but records type REFUND', async () => {
 test('a claimed-but-not-yet-fulfilled key rejects a second concurrent call instead of sending', async () => {
   // Simulate a claim that's in flight (e.g. a real concurrent retry that
   // won the race to INSERT): a payouts row with no tx_hash yet.
-  db.prepare(
-    `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
+  await db.execute({
+    sql: `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
      VALUES (?, ?, ?, 'PAYOUT', ?, NULL, ?)`,
-  ).run(randomUUID(), 'in-flight-key', userId, 100_000, new Date().toISOString())
+    args: [randomUUID(), 'in-flight-key', userId, 100_000, new Date().toISOString()],
+  })
 
   const wallet = createFakeWallet()
   await assert.rejects(
@@ -288,7 +290,8 @@ test('a failed claim releases the idempotency key so a corrected retry can succe
 
   await assert.rejects(() => receiveStake(db, wallet, input), /not found/)
 
-  const afterFailure = db.prepare('SELECT COUNT(*) c FROM payouts WHERE idempotency_key = ?').get('retry-key') as { c: number }
+  const afterFailure = (await db.execute({ sql: 'SELECT COUNT(*) c FROM payouts WHERE idempotency_key = ?', args: ['retry-key'] }))
+    .rows[0] as unknown as { c: number }
   assert.equal(afterFailure.c, 0, 'a failed claim must not leave a stuck row behind')
 
   shouldFail = false

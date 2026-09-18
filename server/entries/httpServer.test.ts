@@ -44,7 +44,7 @@ let baseUrl: string
 
 before(async () => {
   closeDb()
-  migrateUp()
+  await migrateUp()
 
   const router = createRouter()
   registerEntryRoutes(router)
@@ -159,7 +159,8 @@ test('POST /api/entries creates an OPEN entry at the difficulty\'s stake amount,
   // Exactly these five keys — nothing extra snuck into the response.
   assert.deepEqual(Object.keys(body).sort(), ['allowRematch', 'entryId', 'expiresAt', 'status', 'visibility'])
 
-  const row = getDb().prepare('SELECT stake_luna FROM entries WHERE id = ?').get(body.entryId) as { stake_luna: number }
+  const row = (await (await getDb()).execute({ sql: 'SELECT stake_luna FROM entries WHERE id = ?', args: [body.entryId] }))
+    .rows[0] as unknown as { stake_luna: number }
   assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY.hard)
 })
 

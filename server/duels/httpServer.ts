@@ -14,40 +14,55 @@ import { computeBadges } from './badges.ts'
  * the duel is actually decided.
  */
 export function registerDuelRoutes(router: Router): void {
-  router.get('/api/entries', (req, res) => {
-    const exclude = getQueryParams(req).get('exclude') ?? undefined
-    const entries = listOpenEntries(getDb(), exclude)
-    sendJson(res, 200, { entries })
+  router.get('/api/entries', async (req, res) => {
+    try {
+      const exclude = getQueryParams(req).get('exclude') ?? undefined
+      const entries = await listOpenEntries(await getDb(), exclude)
+      sendJson(res, 200, { entries })
+    }
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
   })
 
   // Every entry this address created, any status/visibility — separate
   // from the public browse list above, which deliberately excludes both
   // the caller's own entries and anything PRIVATE.
-  router.get('/api/entries/mine', (req, res) => {
+  router.get('/api/entries/mine', async (req, res) => {
     const nimAddress = getQueryParams(req).get('nimAddress')
     if (!nimAddress) {
       sendJson(res, 400, { error: 'nimAddress query param is required' })
       return
     }
-    const entries = listMyEntries(getDb(), nimAddress)
-    sendJson(res, 200, { entries })
+    try {
+      const entries = await listMyEntries(await getDb(), nimAddress)
+      sendJson(res, 200, { entries })
+    }
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
   })
 
   // Every duel this address has actually finished, as creator or
   // challenger, newest-decided first.
-  router.get('/api/duels/history', (req, res) => {
+  router.get('/api/duels/history', async (req, res) => {
     const nimAddress = getQueryParams(req).get('nimAddress')
     if (!nimAddress) {
       sendJson(res, 400, { error: 'nimAddress query param is required' })
       return
     }
-    const history = listMyDuelHistory(getDb(), nimAddress)
-    sendJson(res, 200, { history, badges: computeBadges(history) })
+    try {
+      const history = await listMyDuelHistory(await getDb(), nimAddress)
+      sendJson(res, 200, { history, badges: computeBadges(history) })
+    }
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
   })
 
   // Resolves a shared duel link — works for a PRIVATE entry too, since
   // knowing its id (from the link) is what stands in for an invite here.
-  router.get('/api/entries/lookup', (req, res) => {
+  router.get('/api/entries/lookup', async (req, res) => {
     const params = getQueryParams(req)
     const entryId = params.get('entryId')
     const exclude = params.get('exclude') ?? undefined
@@ -55,12 +70,17 @@ export function registerDuelRoutes(router: Router): void {
       sendJson(res, 400, { error: 'entryId query param is required' })
       return
     }
-    const result = getEntryForChallenge(getDb(), entryId, exclude)
-    if (!result.ok) {
-      sendJson(res, 404, { error: result.reason })
-      return
+    try {
+      const result = await getEntryForChallenge(await getDb(), entryId, exclude)
+      if (!result.ok) {
+        sendJson(res, 404, { error: result.reason })
+        return
+      }
+      sendJson(res, 200, { entry: result.entry })
     }
-    sendJson(res, 200, { entry: result.entry })
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
   })
 
   router.post('/api/entries/challenge', async (req, res) => {
@@ -84,7 +104,7 @@ export function registerDuelRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await challengeEntry(getDb(), wallet, { entryId, ...stakeInput })
+      const result = await challengeEntry(await getDb(), wallet, { entryId, ...stakeInput })
       if (!result.ok) {
         sendJson(res, 409, { error: result.reason })
         return
@@ -123,7 +143,7 @@ export function registerDuelRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await submitChallenge(getDb(), wallet, { entryId: body.entryId, nimAddress: body.nimAddress, events })
+      const result = await submitChallenge(await getDb(), wallet, { entryId: body.entryId, nimAddress: body.nimAddress, events })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return
@@ -158,7 +178,7 @@ export function registerDuelRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await retryStake(getDb(), wallet, { entryId, ...stakeInput })
+      const result = await retryStake(await getDb(), wallet, { entryId, ...stakeInput })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return
@@ -192,7 +212,7 @@ export function registerDuelRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await retrySubmit(getDb(), wallet, { entryId, ...stakeInput, events })
+      const result = await retrySubmit(await getDb(), wallet, { entryId, ...stakeInput, events })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return
@@ -224,7 +244,7 @@ export function registerDuelRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await declineRetry(getDb(), wallet, { entryId: body.entryId, nimAddress: body.nimAddress })
+      const result = await declineRetry(await getDb(), wallet, { entryId: body.entryId, nimAddress: body.nimAddress })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return

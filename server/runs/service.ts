@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 import type { KeystrokeEvent } from '../../shared/timingEngine.ts'
 import { getOrCreateUser } from '../db/users.ts'
 import { validateRun } from './validateRun.ts'
@@ -24,11 +24,12 @@ export type SubmitRunResult =
 /** Starting point — "tune later" applies here too. */
 export const DEFAULT_DAILY_RUN_LIMIT = 50
 
-function countRunsToday(db: DatabaseSync, userId: string): number {
+async function countRunsToday(db: Db, userId: string): Promise<number> {
   const startOfDay = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`
-  const row = db
-    .prepare('SELECT COUNT(*) c FROM keystroke_runs WHERE user_id = ? AND created_at >= ?')
-    .get(userId, startOfDay) as { c: number }
+  const row = (await db.execute({
+    sql: 'SELECT COUNT(*) c FROM keystroke_runs WHERE user_id = ? AND created_at >= ?',
+    args: [userId, startOfDay],
+  })).rows[0] as unknown as { c: number }
   return row.c
 }
 
@@ -40,18 +41,17 @@ function countRunsToday(db: DatabaseSync, userId: string): number {
  * statistical integrity checks flag but still accept the run (see
  * server/runs/integrity.ts).
  */
-export function submitRun(db: DatabaseSync, input: SubmitRunInput, options: SubmitRunOptions = {}): SubmitRunResult {
-  const paragraph = db.prepare('SELECT id, body FROM paragraphs WHERE id = ?').get(input.paragraphId) as
-    | { id: string, body: string }
-    | undefined
+export async function submitRun(db: Db, input: SubmitRunInput, options: SubmitRunOptions = {}): Promise<SubmitRunResult> {
+  const paragraph = (await db.execute({ sql: 'SELECT id, body FROM paragraphs WHERE id = ?', args: [input.paragraphId] }))
+    .rows[0] as unknown as { id: string, body: string } | undefined
   if (!paragraph) {
     return { ok: false, reason: 'unknown paragraph' }
   }
 
-  const userId = getOrCreateUser(db, input.nimAddress)
+  const userId = await getOrCreateUser(db, input.nimAddress)
 
   const dailyLimit = options.dailyRunLimit ?? DEFAULT_DAILY_RUN_LIMIT
-  if (countRunsToday(db, userId) >= dailyLimit) {
+  if (await countRunsToday(db, userId) >= dailyLimit) {
     return { ok: false, reason: `daily run limit of ${dailyLimit} reached for this address` }
   }
 
@@ -71,18 +71,19 @@ export function submitRun(db: DatabaseSync, input: SubmitRunInput, options: Subm
   }
 
   const runId = randomUUID()
-  db.prepare(
-    `INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, flags, created_at)
+  await db.execute({
+    sql: `INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, flags, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    runId,
-    userId,
-    paragraph.id,
-    JSON.stringify(input.events),
-    validation.durationMs,
-    integrity.flags.length > 0 ? JSON.stringify(integrity.flags) : null,
-    new Date().toISOString(),
-  )
+    args: [
+      runId,
+      userId,
+      paragraph.id,
+      JSON.stringify(input.events),
+      validation.durationMs,
+      integrity.flags.length > 0 ? JSON.stringify(integrity.flags) : null,
+      new Date().toISOString(),
+    ],
+  })
 
   return { ok: true, runId, durationMs: validation.durationMs, flags: integrity.flags }
 }

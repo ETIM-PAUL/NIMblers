@@ -16,10 +16,12 @@ let baseUrl: string
 
 before(async () => {
   closeDb()
-  migrateUp()
-  getDb()
-    .prepare('INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)')
-    .run(PARAGRAPH_ID, TARGET, 'easy', new Date().toISOString())
+  await migrateUp()
+  const db = await getDb()
+  await db.execute({
+    sql: 'INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
+    args: [PARAGRAPH_ID, TARGET, 'easy', new Date().toISOString()],
+  })
 
   server = createRunsServer()
   await new Promise<void>((resolve) => server.listen(0, resolve))

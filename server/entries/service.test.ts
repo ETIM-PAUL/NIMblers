@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test } from 'node:test'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { createEntry, DUEL_STAKE_LUNA_BY_DIFFICULTY, revealEntry } from './service.ts'
@@ -47,7 +47,7 @@ function honestEventsFor(target: string, msPerChar = 100): { key: string, tRelat
 
 /** Reveals (staking with the given wallet/difficulty), asserts it worked, and returns the paragraph the player was actually shown — the only way to know it in advance, by design. */
 async function revealParagraph(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { stakeTxHash: string, difficulty: 'easy' | 'medium' | 'hard' },
 ): Promise<{ paragraphId: string, paragraphBody: string }> {
@@ -57,12 +57,12 @@ async function revealParagraph(
   return revealed
 }
 
-let db: DatabaseSync
+let db: Db
 
-beforeEach(() => {
+beforeEach(async () => {
   closeDb()
-  migrateUp()
-  db = getDb()
+  await migrateUp()
+  db = await getDb()
 })
 
 test('revealEntry verifies the stake and generates a fresh paragraph for that difficulty', async () => {
@@ -140,7 +140,7 @@ test('createEntry creates an OPEN entry at the tier\'s stake amount, and the res
   const keys = Object.keys(result).join(',').toLowerCase()
   assert.ok(!keys.includes('duration'), `result keys leaked timing info: ${keys}`)
 
-  const row = db.prepare('SELECT * FROM entries WHERE id = ?').get(result.entryId) as {
+  const row = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [result.entryId] })).rows[0] as unknown as {
     status: string
     paragraph_id: string
     stake_luna: number
@@ -170,7 +170,8 @@ test('each difficulty tier requires its own stake amount', async () => {
     })
     assert.equal(result.ok, true, `${difficulty} entry should be created with its own ${DUEL_STAKE_LUNA_BY_DIFFICULTY[difficulty]} Luna stake`)
     if (!result.ok) continue
-    const row = db.prepare('SELECT stake_luna FROM entries WHERE id = ?').get(result.entryId) as { stake_luna: number }
+    const row = (await db.execute({ sql: 'SELECT stake_luna FROM entries WHERE id = ?', args: [result.entryId] }))
+      .rows[0] as unknown as { stake_luna: number }
     assert.equal(row.stake_luna, DUEL_STAKE_LUNA_BY_DIFFICULTY[difficulty])
   }
 })
@@ -186,7 +187,7 @@ test('createEntry rejects a run that does not match the paragraph generated for 
   const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'stake-tx-1', difficulty: 'easy', events })
   assert.equal(result.ok, false)
 
-  const count = db.prepare('SELECT COUNT(*) c FROM entries').get() as { c: number }
+  const count = (await db.execute('SELECT COUNT(*) c FROM entries')).rows[0] as unknown as { c: number }
   assert.equal(count.c, 0)
 })
 
@@ -197,7 +198,7 @@ test('createEntry rejects when the stake cannot be verified, and creates no entr
   const result = await createEntry(db, wallet, { nimAddress: PLAYER_ADDRESS, stakeTxHash: 'nope', difficulty: 'easy', events })
   assert.equal(result.ok, false)
 
-  const count = db.prepare('SELECT COUNT(*) c FROM entries').get() as { c: number }
+  const count = (await db.execute('SELECT COUNT(*) c FROM entries')).rows[0] as unknown as { c: number }
   assert.equal(count.c, 0)
 })
 
@@ -211,7 +212,7 @@ test('createEntry is idempotent per stakeTxHash — a retried submit returns the
   const second = await createEntry(db, wallet, input)
 
   assert.deepEqual(first, second)
-  const count = db.prepare('SELECT COUNT(*) c FROM entries').get() as { c: number }
+  const count = (await db.execute('SELECT COUNT(*) c FROM entries')).rows[0] as unknown as { c: number }
   assert.equal(count.c, 1)
 })
 
@@ -228,7 +229,8 @@ test('createEntry defaults to PUBLIC when visibility is not specified', async ()
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.visibility, 'PUBLIC')
-  const row = db.prepare('SELECT visibility FROM entries WHERE id = ?').get(result.entryId) as { visibility: string }
+  const row = (await db.execute({ sql: 'SELECT visibility FROM entries WHERE id = ?', args: [result.entryId] }))
+    .rows[0] as unknown as { visibility: string }
   assert.equal(row.visibility, 'PUBLIC')
 })
 
@@ -246,7 +248,8 @@ test('createEntry stores PRIVATE when the caller asks for it', async () => {
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.visibility, 'PRIVATE')
-  const row = db.prepare('SELECT visibility FROM entries WHERE id = ?').get(result.entryId) as { visibility: string }
+  const row = (await db.execute({ sql: 'SELECT visibility FROM entries WHERE id = ?', args: [result.entryId] }))
+    .rows[0] as unknown as { visibility: string }
   assert.equal(row.visibility, 'PRIVATE')
 })
 
@@ -258,12 +261,12 @@ test('a stake with no completed submission creates no entry — closing the tab 
   assert.equal(revealed.ok, true)
 
   // ...but A closes the tab and never calls createEntry.
-  const entryCount = db.prepare('SELECT COUNT(*) c FROM entries').get() as { c: number }
+  const entryCount = (await db.execute('SELECT COUNT(*) c FROM entries')).rows[0] as unknown as { c: number }
   assert.equal(entryCount.c, 0, 'no entry should exist without a submitted run')
 
   // The stake was still real money that moved into the house wallet —
   // it's recorded, just with nothing to ever refund it automatically.
-  const payout = db.prepare("SELECT * FROM payouts WHERE type = 'STAKE_RECEIVED'").get() as
+  const payout = (await db.execute("SELECT * FROM payouts WHERE type = 'STAKE_RECEIVED'")).rows[0] as unknown as
     | { amount_luna: number, tx_hash: string }
     | undefined
   assert.ok(payout, 'the stake itself was still received and recorded')

@@ -1,43 +1,43 @@
 import assert from 'node:assert/strict'
 import { beforeEach, test } from 'node:test'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrGenerateParagraphForStake } from './repository.ts'
 
 process.env.DB_PATH = ':memory:'
 
-let db: DatabaseSync
+let db: Db
 
-beforeEach(() => {
+beforeEach(async () => {
   closeDb()
-  migrateUp()
-  db = getDb()
+  await migrateUp()
+  db = await getDb()
 })
 
-test('getOrGenerateParagraphForStake generates and persists a fresh paragraph for a new stake', () => {
-  const paragraph = getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
+test('getOrGenerateParagraphForStake generates and persists a fresh paragraph for a new stake', async () => {
+  const paragraph = await getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
   assert.ok(paragraph.id)
   assert.ok(paragraph.body.length > 0)
   assert.equal(paragraph.difficulty, 'easy')
 
-  const row = db.prepare('SELECT reveal_stake_tx_hash FROM paragraphs WHERE id = ?').get(paragraph.id) as
-    | { reveal_stake_tx_hash: string }
-    | undefined
+  const row = (await db.execute({ sql: 'SELECT reveal_stake_tx_hash FROM paragraphs WHERE id = ?', args: [paragraph.id] }))
+    .rows[0] as unknown as { reveal_stake_tx_hash: string } | undefined
   assert.equal(row?.reveal_stake_tx_hash, 'tx-1')
 })
 
-test('getOrGenerateParagraphForStake is idempotent — the same stake always gets back the same paragraph, not a new one', () => {
-  const first = getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
-  const second = getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
+test('getOrGenerateParagraphForStake is idempotent — the same stake always gets back the same paragraph, not a new one', async () => {
+  const first = await getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
+  const second = await getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
   assert.deepEqual(first, second)
 
-  const count = db.prepare('SELECT COUNT(*) c FROM paragraphs WHERE reveal_stake_tx_hash = ?').get('tx-1') as { c: number }
+  const count = (await db.execute({ sql: 'SELECT COUNT(*) c FROM paragraphs WHERE reveal_stake_tx_hash = ?', args: ['tx-1'] }))
+    .rows[0] as unknown as { c: number }
   assert.equal(count.c, 1, 'a retry must not insert a second row')
 })
 
-test('different stakes get different paragraphs', () => {
-  const first = getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
-  const second = getOrGenerateParagraphForStake(db, 'tx-2', 'easy')
+test('different stakes get different paragraphs', async () => {
+  const first = await getOrGenerateParagraphForStake(db, 'tx-1', 'easy')
+  const second = await getOrGenerateParagraphForStake(db, 'tx-2', 'easy')
   assert.notEqual(first.id, second.id)
 })

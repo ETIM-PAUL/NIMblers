@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { beforeEach, test } from 'node:test'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
@@ -67,37 +67,37 @@ function fakeSettlingWallet(): HouseWallet {
   }
 }
 
-let db: DatabaseSync
+let db: Db
 let entryId: string
 
-beforeEach(() => {
+beforeEach(async () => {
   closeDb()
-  migrateUp()
-  db = getDb()
+  await migrateUp()
+  db = await getDb()
   const now = new Date().toISOString()
-  db.prepare('INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)').run(
-    PARAGRAPH_ID,
-    TARGET,
-    'easy',
-    now,
-  )
+  await db.execute({
+    sql: 'INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
+    args: [PARAGRAPH_ID, TARGET, 'easy', now],
+  })
 
-  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
   const runId = randomUUID()
-  db.prepare(
-    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(runId, creatorId, PARAGRAPH_ID, '[]', 5000, now)
+  await db.execute({
+    sql: 'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [runId, creatorId, PARAGRAPH_ID, '[]', 5000, now],
+  })
 
   entryId = randomUUID()
   const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString()
-  db.prepare(
-    `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
+  await db.execute({
+    sql: `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
      VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
-  ).run(entryId, creatorId, PARAGRAPH_ID, runId, STAKE_LUNA, now, expiresAt, 'creator-stake-tx')
+    args: [entryId, creatorId, PARAGRAPH_ID, runId, STAKE_LUNA, now, expiresAt, 'creator-stake-tx'],
+  })
 })
 
-test('listOpenEntries returns opponent address, stake, and age — no time', () => {
-  const list = listOpenEntries(db)
+test('listOpenEntries returns opponent address, stake, and age — no time', async () => {
+  const list = await listOpenEntries(db)
   assert.equal(list.length, 1)
   assert.equal(list[0].entryId, entryId)
   assert.equal(list[0].creatorAddress, CREATOR_ADDRESS)
@@ -107,32 +107,32 @@ test('listOpenEntries returns opponent address, stake, and age — no time', () 
   assert.ok(!keys.includes('duration'), `listing leaked timing info: ${keys}`)
 })
 
-test('listOpenEntries excludes the caller\'s own entries', () => {
-  const list = listOpenEntries(db, CREATOR_ADDRESS)
+test('listOpenEntries excludes the caller\'s own entries', async () => {
+  const list = await listOpenEntries(db, CREATOR_ADDRESS)
   assert.equal(list.length, 0)
 })
 
-test('listOpenEntries excludes entries that are no longer OPEN', () => {
-  db.prepare("UPDATE entries SET status = 'LOCKED' WHERE id = ?").run(entryId)
-  assert.equal(listOpenEntries(db).length, 0)
+test('listOpenEntries excludes entries that are no longer OPEN', async () => {
+  await db.execute({ sql: "UPDATE entries SET status = 'LOCKED' WHERE id = ?", args: [entryId] })
+  assert.equal((await listOpenEntries(db)).length, 0)
 })
 
-test('listOpenEntries excludes entries past their 24h window', () => {
-  db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
-  assert.equal(listOpenEntries(db).length, 0)
+test('listOpenEntries excludes entries past their 24h window', async () => {
+  await db.execute({ sql: 'UPDATE entries SET expires_at = ? WHERE id = ?', args: [new Date(Date.now() - 1000).toISOString(), entryId] })
+  assert.equal((await listOpenEntries(db)).length, 0)
 })
 
-test('listOpenEntries excludes PRIVATE entries — they are only reachable by their link', () => {
-  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
-  assert.equal(listOpenEntries(db).length, 0)
+test('listOpenEntries excludes PRIVATE entries — they are only reachable by their link', async () => {
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
+  assert.equal((await listOpenEntries(db)).length, 0)
 })
 
-test('getEntryForChallenge finds a PRIVATE entry by id even though it is hidden from the dashboard', () => {
-  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+test('getEntryForChallenge finds a PRIVATE entry by id even though it is hidden from the dashboard', async () => {
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
 
-  assert.equal(listOpenEntries(db).length, 0, 'sanity check: still not listed')
+  assert.equal((await listOpenEntries(db)).length, 0, 'sanity check: still not listed')
 
-  const result = getEntryForChallenge(db, entryId)
+  const result = await getEntryForChallenge(db, entryId)
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.entry.entryId, entryId)
@@ -140,38 +140,38 @@ test('getEntryForChallenge finds a PRIVATE entry by id even though it is hidden 
   assert.equal(result.entry.visibility, 'PRIVATE')
 })
 
-test('getEntryForChallenge finds a PUBLIC entry too — the lookup works regardless of visibility', () => {
-  const result = getEntryForChallenge(db, entryId)
+test('getEntryForChallenge finds a PUBLIC entry too — the lookup works regardless of visibility', async () => {
+  const result = await getEntryForChallenge(db, entryId)
   assert.equal(result.ok, true)
   if (!result.ok) return
   assert.equal(result.entry.visibility, 'PUBLIC')
 })
 
-test('getEntryForChallenge rejects an unknown id', () => {
-  const result = getEntryForChallenge(db, 'does-not-exist')
+test('getEntryForChallenge rejects an unknown id', async () => {
+  const result = await getEntryForChallenge(db, 'does-not-exist')
   assert.equal(result.ok, false)
 })
 
-test('getEntryForChallenge rejects the creator looking up their own entry', () => {
-  const result = getEntryForChallenge(db, entryId, CREATOR_ADDRESS)
+test('getEntryForChallenge rejects the creator looking up their own entry', async () => {
+  const result = await getEntryForChallenge(db, entryId, CREATOR_ADDRESS)
   assert.equal(result.ok, false)
 })
 
-test('getEntryForChallenge rejects an entry that is no longer OPEN', () => {
-  db.prepare("UPDATE entries SET status = 'LOCKED' WHERE id = ?").run(entryId)
-  const result = getEntryForChallenge(db, entryId)
+test('getEntryForChallenge rejects an entry that is no longer OPEN', async () => {
+  await db.execute({ sql: "UPDATE entries SET status = 'LOCKED' WHERE id = ?", args: [entryId] })
+  const result = await getEntryForChallenge(db, entryId)
   assert.equal(result.ok, false)
 })
 
-test('getEntryForChallenge rejects an entry past its 24h window', () => {
-  db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
-  const result = getEntryForChallenge(db, entryId)
+test('getEntryForChallenge rejects an entry past its 24h window', async () => {
+  await db.execute({ sql: 'UPDATE entries SET expires_at = ? WHERE id = ?', args: [new Date(Date.now() - 1000).toISOString(), entryId] })
+  const result = await getEntryForChallenge(db, entryId)
   assert.equal(result.ok, false)
 })
 
-test('listMyEntries returns the creator\'s own entry, regardless of visibility', () => {
-  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
-  const mine = listMyEntries(db, CREATOR_ADDRESS)
+test('listMyEntries returns the creator\'s own entry, regardless of visibility', async () => {
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
+  const mine = await listMyEntries(db, CREATOR_ADDRESS)
   assert.equal(mine.length, 1)
   assert.equal(mine[0].entryId, entryId)
   assert.equal(mine[0].status, 'OPEN')
@@ -180,13 +180,13 @@ test('listMyEntries returns the creator\'s own entry, regardless of visibility',
   assert.equal(mine[0].outcome, null)
 })
 
-test('listMyEntries returns nothing for someone who has not created any entries', () => {
-  assert.deepEqual(listMyEntries(db, CHALLENGER_ADDRESS), [])
+test('listMyEntries returns nothing for someone who has not created any entries', async () => {
+  assert.deepEqual(await listMyEntries(db, CHALLENGER_ADDRESS), [])
 })
 
 test('listMyEntries shows the challenger once the entry is locked, before settlement', async () => {
   await challengeEntry(db, fakeWallet(), { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'challenger-tx' })
-  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  const mine = await listMyEntries(db, CREATOR_ADDRESS)
   assert.equal(mine[0].status, 'LOCKED')
   assert.equal(mine[0].challengerAddress, CHALLENGER_ADDRESS)
   assert.equal(mine[0].outcome, null, 'not settled yet')
@@ -198,36 +198,40 @@ test('listMyEntries reports the outcome from the creator\'s perspective once set
   // The challenger's slower run loses — the creator (seeded at 5000ms) wins.
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
 
-  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  const mine = await listMyEntries(db, CREATOR_ADDRESS)
   assert.equal(mine[0].status, 'SETTLED')
   assert.equal(mine[0].outcome, 'creator')
 })
 
-test('listMyEntries reports an OPEN entry past its expiry as EXPIRED, even before the sweep job has run', () => {
+test('listMyEntries reports an OPEN entry past its expiry as EXPIRED, even before the sweep job has run', async () => {
   // The sweep (server/duels/expiryJob.ts) is what actually flips the DB
   // row and issues the refund, on whatever schedule it's deployed with —
   // this only fixes what gets displayed if that hasn't happened yet.
   const oneDayAgo = new Date(Date.now() - 25 * 60 * 60_000).toISOString()
-  db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(oneDayAgo, entryId)
+  await db.execute({ sql: 'UPDATE entries SET expires_at = ? WHERE id = ?', args: [oneDayAgo, entryId] })
 
-  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  const mine = await listMyEntries(db, CREATOR_ADDRESS)
   assert.equal(mine[0].status, 'EXPIRED')
 
-  const row = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const row = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(row.status, 'OPEN', 'the underlying row is untouched — only the sweep job actually settles the refund')
 })
 
 test('listMyEntries does not report a LOCKED or SETTLED entry as EXPIRED just because its expiry has passed', async () => {
   const wallet = fakeSettlingWallet()
   await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'challenger-tx' })
-  db.prepare("UPDATE entries SET expires_at = ? WHERE id = ?").run(new Date(Date.now() - 25 * 60 * 60_000).toISOString(), entryId)
+  await db.execute({
+    sql: 'UPDATE entries SET expires_at = ? WHERE id = ?',
+    args: [new Date(Date.now() - 25 * 60 * 60_000).toISOString(), entryId],
+  })
 
-  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  const mine = await listMyEntries(db, CREATOR_ADDRESS)
   assert.equal(mine[0].status, 'LOCKED', 'a duel already being played is not "expired" just because the original OPEN window passed')
 })
 
 test('a PRIVATE entry can still be challenged and settled through the normal flow', async () => {
-  db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
   const wallet = fakeSettlingWallet()
 
   const challengeResult = await challengeEntry(db, wallet, {
@@ -254,29 +258,33 @@ test('challengeEntry locks the entry, takes the stake, and reveals the paragraph
   assert.equal(result.paragraphId, PARAGRAPH_ID)
   assert.equal(result.paragraphBody, TARGET)
 
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'LOCKED')
 
-  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(entryId) as { challenger_user_id: string }
+  const duel = (await db.execute({ sql: 'SELECT * FROM duels WHERE entry_id = ?', args: [entryId] }))
+    .rows[0] as unknown as { challenger_user_id: string }
   assert.ok(duel)
-  const challengerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
+  const challengerId = await getOrCreateUser(db, CHALLENGER_ADDRESS)
   assert.equal(duel.challenger_user_id, challengerId)
 })
 
 test('challengeEntry requires matching this specific entry\'s stake, not a fixed global amount', async () => {
   // A pricier ("hard") entry, staked at 500,000 Luna instead of this
   // file's 100,000-Luna default.
-  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
   const pricierEntryId = randomUUID()
   const runId = randomUUID()
   const now = new Date().toISOString()
-  db.prepare(
-    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(runId, creatorId, PARAGRAPH_ID, '[]', 5000, now)
-  db.prepare(
-    `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
+  await db.execute({
+    sql: 'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [runId, creatorId, PARAGRAPH_ID, '[]', 5000, now],
+  })
+  await db.execute({
+    sql: `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
      VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
-  ).run(pricierEntryId, creatorId, PARAGRAPH_ID, runId, 500_000, now, new Date(Date.now() + 86_400_000).toISOString(), 'pricier-stake-tx')
+    args: [pricierEntryId, creatorId, PARAGRAPH_ID, runId, 500_000, now, new Date(Date.now() + 86_400_000).toISOString(), 'pricier-stake-tx'],
+  })
 
   const wallet = fakeWallet() // always reports a 100,000-Luna transaction
   const result = await challengeEntry(db, wallet, {
@@ -286,7 +294,8 @@ test('challengeEntry requires matching this specific entry\'s stake, not a fixed
   })
 
   assert.equal(result.ok, false, 'a 100,000-Luna stake must not be accepted for a 500,000-Luna entry')
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(pricierEntryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [pricierEntryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'OPEN', 'the lock must be released after the mismatched stake is rejected')
 })
 
@@ -299,7 +308,8 @@ test('challengeEntry rejects challenging your own entry', async () => {
   })
   assert.equal(result.ok, false)
 
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'OPEN', 'an entry must stay OPEN after a rejected self-challenge')
 })
 
@@ -328,10 +338,12 @@ test('two simultaneous challenge requests on the same entry produce one lock and
   assert.equal(succeeded.length, 1, 'exactly one challenger should win the lock')
   assert.equal(rejected.length, 1, 'exactly one challenger should get a clean rejection')
 
-  const duelCount = db.prepare('SELECT COUNT(*) c FROM duels WHERE entry_id = ?').get(entryId) as { c: number }
+  const duelCount = (await db.execute({ sql: 'SELECT COUNT(*) c FROM duels WHERE entry_id = ?', args: [entryId] }))
+    .rows[0] as unknown as { c: number }
   assert.equal(duelCount.c, 1, 'only one duel row must ever exist for this entry')
 
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'LOCKED')
 })
 
@@ -341,7 +353,8 @@ test('challengeEntry called twice by the same challenger is idempotent, not a ra
   const second = await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'retry-tx' })
 
   assert.deepEqual(first, second)
-  const duelCount = db.prepare('SELECT COUNT(*) c FROM duels WHERE entry_id = ?').get(entryId) as { c: number }
+  const duelCount = (await db.execute({ sql: 'SELECT COUNT(*) c FROM duels WHERE entry_id = ?', args: [entryId] }))
+    .rows[0] as unknown as { c: number }
   assert.equal(duelCount.c, 1)
 })
 
@@ -350,7 +363,8 @@ test('a failed stake releases the lock so someone else can challenge', async () 
   const failed = await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'bad-tx' })
   assert.equal(failed.ok, false)
 
-  const entryAfterFailure = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entryAfterFailure = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entryAfterFailure.status, 'OPEN', 'the lock must be released after a failed stake')
 
   const retried = await challengeEntry(db, wallet, {
@@ -361,7 +375,7 @@ test('a failed stake releases the lock so someone else can challenge', async () 
   assert.equal(retried.ok, true)
 })
 
-async function lockEntryForChallenger(db: DatabaseSync, wallet: HouseWallet = fakeWallet()): Promise<void> {
+async function lockEntryForChallenger(db: Db, wallet: HouseWallet = fakeWallet()): Promise<void> {
   const result = await challengeEntry(db, wallet, {
     entryId,
     nimAddress: CHALLENGER_ADDRESS,
@@ -389,16 +403,20 @@ test('submitChallenge records the challenger\'s run and settles the duel, reveal
   assert.equal(result.deltaMs, 4300)
   assert.equal(result.txHashes.length, 1)
 
-  const duel = db.prepare('SELECT challenger_keystroke_run_id, winner_user_id, settled_at FROM duels WHERE entry_id = ?').get(entryId) as {
+  const duel = (await db.execute({
+    sql: 'SELECT challenger_keystroke_run_id, winner_user_id, settled_at FROM duels WHERE entry_id = ?',
+    args: [entryId],
+  })).rows[0] as unknown as {
     challenger_keystroke_run_id: string | null
     winner_user_id: string | null
     settled_at: string | null
   }
   assert.ok(duel.challenger_keystroke_run_id)
   assert.ok(duel.settled_at)
-  assert.equal(duel.winner_user_id, getOrCreateUser(db, CHALLENGER_ADDRESS))
+  assert.equal(duel.winner_user_id, await getOrCreateUser(db, CHALLENGER_ADDRESS))
 
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'SETTLED')
 })
 
@@ -408,11 +426,9 @@ test('submitChallenge pays the winner the pot minus the 10% rake', async () => {
   const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
   assert.equal(result.ok, true)
 
-  const winnerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
-  const payoutRow = db.prepare("SELECT * FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(winnerId) as {
-    amount_luna: number
-    tx_hash: string | null
-  }
+  const winnerId = await getOrCreateUser(db, CHALLENGER_ADDRESS)
+  const payoutRow = (await db.execute({ sql: "SELECT * FROM payouts WHERE type = 'PAYOUT' AND user_id = ?", args: [winnerId] }))
+    .rows[0] as unknown as { amount_luna: number, tx_hash: string | null }
   assert.ok(payoutRow, 'expected a PAYOUT row for the winner')
   assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9))
   assert.ok(payoutRow.tx_hash)
@@ -433,18 +449,20 @@ test('submitChallenge refunds both players in full on a tie, no rake taken', asy
   assert.equal(result.deltaMs, 0)
   assert.equal(result.txHashes.length, 2)
 
-  const refundRows = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'REFUND'").all() as { amount_luna: number }[]
+  const refundRows = (await db.execute("SELECT amount_luna FROM payouts WHERE type = 'REFUND'"))
+    .rows as unknown as { amount_luna: number }[]
   assert.equal(refundRows.length, 2)
   for (const row of refundRows) assert.equal(row.amount_luna, STAKE_LUNA, 'a tie refund must not be raked')
 
-  const duel = db.prepare('SELECT winner_user_id FROM duels WHERE entry_id = ?').get(entryId) as { winner_user_id: string | null }
+  const duel = (await db.execute({ sql: 'SELECT winner_user_id FROM duels WHERE entry_id = ?', args: [entryId] }))
+    .rows[0] as unknown as { winner_user_id: string | null }
   assert.equal(duel.winner_user_id, null)
 })
 
 // --- Double trial ---
 
 test('submitChallenge settles immediately on a win, even when the entry allows a rematch', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: honestEventsFor(TARGET) })
@@ -465,7 +483,7 @@ test('submitChallenge settles immediately on a loss when the entry does not allo
 })
 
 test('submitChallenge returns a pending decision on a loss when the entry allows a rematch — A\'s time stays hidden', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -478,19 +496,20 @@ test('submitChallenge returns a pending decision on a loss when the entry allows
   assert.ok(result.retryDeadline)
   assert.ok(!('creatorDurationMs' in result), "A's time must not leak while a retry is still undecided")
 
-  const duel = db.prepare('SELECT settled_at, retry_offer_expires_at FROM duels WHERE entry_id = ?').get(entryId) as {
-    settled_at: string | null
-    retry_offer_expires_at: string | null
-  }
+  const duel = (await db.execute({
+    sql: 'SELECT settled_at, retry_offer_expires_at FROM duels WHERE entry_id = ?',
+    args: [entryId],
+  })).rows[0] as unknown as { settled_at: string | null, retry_offer_expires_at: string | null }
   assert.equal(duel.settled_at, null, 'nothing should be settled yet')
   assert.ok(duel.retry_offer_expires_at)
 
-  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type IN ('PAYOUT', 'REFUND')").get() as { c: number }
+  const payoutCount = (await db.execute("SELECT COUNT(*) c FROM payouts WHERE type IN ('PAYOUT', 'REFUND')"))
+    .rows[0] as unknown as { c: number }
   assert.equal(payoutCount.c, 0, 'no money should move until the retry is decided')
 })
 
 test('submitChallenge is idempotent for a pending decision — calling it again returns the same deadline, not a fresh one', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   const events = slowEventsFor(TARGET)
@@ -501,7 +520,7 @@ test('submitChallenge is idempotent for a pending decision — calling it again 
 })
 
 test('retryStake verifies the doubled stake and rejects the un-doubled original amount', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -527,11 +546,14 @@ test('retryStake rejects when no retry is pending for this entry', async () => {
 })
 
 test('retryStake rejects once the retry window has expired', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
-  db.prepare('UPDATE duels SET retry_offer_expires_at = ? WHERE entry_id = ?').run(new Date(Date.now() - 1000).toISOString(), entryId)
+  await db.execute({
+    sql: 'UPDATE duels SET retry_offer_expires_at = ? WHERE entry_id = ?',
+    args: [new Date(Date.now() - 1000).toISOString(), entryId],
+  })
 
   const result = await retryStake(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'too-late-tx' })
   assert.equal(result.ok, false)
@@ -547,7 +569,7 @@ function walletForRetryStake(base: HouseWallet, valueLuna: number): HouseWallet 
 }
 
 test('retrySubmit settles a challenger win on the retry — the pot is the original 2x plus the doubled retry stake', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -564,17 +586,19 @@ test('retrySubmit settles a challenger win on the retry — the pot is the origi
   if (!result.ok || result.pending) return
   assert.equal(result.outcome, 'challenger')
 
-  const winnerId = getOrCreateUser(db, CHALLENGER_ADDRESS)
-  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(winnerId) as { amount_luna: number }
+  const winnerId = await getOrCreateUser(db, CHALLENGER_ADDRESS)
+  const payoutRow = (await db.execute({ sql: "SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?", args: [winnerId] }))
+    .rows[0] as unknown as { amount_luna: number }
   // Pot = creator's 1x + challenger's original 1x + challenger's retry 2x = 4x, minus the 10% rake.
   assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 4 * 0.9))
 
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'SETTLED')
 })
 
 test('retrySubmit settles a second loss — "that is the end" — paying the creator the full 4x pot', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -591,13 +615,14 @@ test('retrySubmit settles a second loss — "that is the end" — paying the cre
   if (!result.ok || result.pending) return
   assert.equal(result.outcome, 'creator')
 
-  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
-  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId) as { amount_luna: number }
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
+  const payoutRow = (await db.execute({ sql: "SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?", args: [creatorId] }))
+    .rows[0] as unknown as { amount_luna: number }
   assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 4 * 0.9))
 })
 
 test('retrySubmit is idempotent — calling it twice pays out once', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -608,12 +633,12 @@ test('retrySubmit is idempotent — calling it twice pays out once', async () =>
   const second = await retrySubmit(db, retryWallet, input)
 
   assert.deepEqual(first, second)
-  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'").get() as { c: number }
+  const payoutCount = (await db.execute("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'")).rows[0] as unknown as { c: number }
   assert.equal(payoutCount.c, 1)
 })
 
 test('declineRetry settles immediately as a loss at the original pot only — no rake-free bonus for declining', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -624,11 +649,13 @@ test('declineRetry settles immediately as a loss at the original pot only — no
   if (!result.ok || result.pending) return
   assert.equal(result.outcome, 'creator')
 
-  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
-  const payoutRow = db.prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId) as { amount_luna: number }
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
+  const payoutRow = (await db.execute({ sql: "SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?", args: [creatorId] }))
+    .rows[0] as unknown as { amount_luna: number }
   assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9), 'declining settles the ORIGINAL 2x pot, not the retry-sized one')
 
-  const entry = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  const entry = (await db.execute({ sql: 'SELECT status FROM entries WHERE id = ?', args: [entryId] }))
+    .rows[0] as unknown as { status: string }
   assert.equal(entry.status, 'SETTLED')
 })
 
@@ -640,7 +667,7 @@ test('declineRetry rejects when no retry is pending', async () => {
 })
 
 test('declineRetry rejects once the retry has already been taken', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -677,9 +704,8 @@ test('submitChallenge rejects a tampered run and records nothing', async () => {
   const result = await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events })
   assert.equal(result.ok, false)
 
-  const duel = db.prepare('SELECT challenger_keystroke_run_id FROM duels WHERE entry_id = ?').get(entryId) as {
-    challenger_keystroke_run_id: string | null
-  }
+  const duel = (await db.execute({ sql: 'SELECT challenger_keystroke_run_id FROM duels WHERE entry_id = ?', args: [entryId] }))
+    .rows[0] as unknown as { challenger_keystroke_run_id: string | null }
   assert.equal(duel.challenger_keystroke_run_id, null)
 })
 
@@ -693,10 +719,10 @@ test('submitChallenge is idempotent — calling it twice records the run once an
   assert.equal(first.ok, true)
   assert.deepEqual(first, second, 'a retry must return the exact same reveal, not move money again')
 
-  const runCount = db.prepare('SELECT COUNT(*) c FROM keystroke_runs').get() as { c: number }
+  const runCount = (await db.execute('SELECT COUNT(*) c FROM keystroke_runs')).rows[0] as unknown as { c: number }
   assert.equal(runCount.c, 2) // creator's seeded run + challenger's one run, not two
 
-  const payoutCount = db.prepare("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'").get() as { c: number }
+  const payoutCount = (await db.execute("SELECT COUNT(*) c FROM payouts WHERE type = 'PAYOUT'")).rows[0] as unknown as { c: number }
   assert.equal(payoutCount.c, 1, 'a retry must not pay out twice')
 })
 
@@ -707,7 +733,7 @@ test('listMyDuelHistory shows a win from the creator\'s side and a loss from the
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
 
-  const creatorHistory = listMyDuelHistory(db, CREATOR_ADDRESS)
+  const creatorHistory = await listMyDuelHistory(db, CREATOR_ADDRESS)
   assert.equal(creatorHistory.length, 1)
   assert.equal(creatorHistory[0].outcome, 'won')
   assert.equal(creatorHistory[0].opponentAddress, CHALLENGER_ADDRESS)
@@ -716,7 +742,7 @@ test('listMyDuelHistory shows a win from the creator\'s side and a loss from the
   assert.equal(creatorHistory[0].stakeLuna, STAKE_LUNA)
   assert.ok(creatorHistory[0].deltaMs > 0)
 
-  const challengerHistory = listMyDuelHistory(db, CHALLENGER_ADDRESS)
+  const challengerHistory = await listMyDuelHistory(db, CHALLENGER_ADDRESS)
   assert.equal(challengerHistory.length, 1)
   assert.equal(challengerHistory[0].outcome, 'lost')
   assert.equal(challengerHistory[0].opponentAddress, CREATOR_ADDRESS)
@@ -730,20 +756,20 @@ test('listMyDuelHistory reports a tie for both players, with a zero delta', asyn
   tieEvents[tieEvents.length - 1] = { ...tieEvents[tieEvents.length - 1], tRelativeMs: 5000 }
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: tieEvents })
 
-  assert.equal(listMyDuelHistory(db, CREATOR_ADDRESS)[0].outcome, 'tied')
-  assert.equal(listMyDuelHistory(db, CHALLENGER_ADDRESS)[0].outcome, 'tied')
-  assert.equal(listMyDuelHistory(db, CREATOR_ADDRESS)[0].deltaMs, 0)
+  assert.equal((await listMyDuelHistory(db, CREATOR_ADDRESS))[0].outcome, 'tied')
+  assert.equal((await listMyDuelHistory(db, CHALLENGER_ADDRESS))[0].outcome, 'tied')
+  assert.equal((await listMyDuelHistory(db, CREATOR_ADDRESS))[0].deltaMs, 0)
 })
 
 test('listMyDuelHistory excludes duels that are not yet settled', async () => {
   const wallet = fakeWallet()
   await lockEntryForChallenger(db, wallet) // LOCKED, never submitted
-  assert.deepEqual(listMyDuelHistory(db, CREATOR_ADDRESS), [])
-  assert.deepEqual(listMyDuelHistory(db, CHALLENGER_ADDRESS), [])
+  assert.deepEqual(await listMyDuelHistory(db, CREATOR_ADDRESS), [])
+  assert.deepEqual(await listMyDuelHistory(db, CHALLENGER_ADDRESS), [])
 })
 
 test('listMyDuelHistory uses the retry\'s duration, not the original losing attempt, once a double trial is decided', async () => {
-  db.prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   const wallet = fakeSettlingWallet()
   await lockEntryForChallenger(db, wallet)
   await submitChallenge(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, events: slowEventsFor(TARGET) })
@@ -752,7 +778,7 @@ test('listMyDuelHistory uses the retry\'s duration, not the original losing atte
   const retryEvents = honestEventsFor(TARGET)
   await retrySubmit(db, retryWallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'retry-history-tx', events: retryEvents })
 
-  const history = listMyDuelHistory(db, CHALLENGER_ADDRESS)
+  const history = await listMyDuelHistory(db, CHALLENGER_ADDRESS)
   assert.equal(history.length, 1, 'the original losing attempt and the retry are one settled duel, not two')
   assert.equal(history[0].outcome, 'won')
   assert.equal(history[0].myDurationMs, retryEvents[retryEvents.length - 1].tRelativeMs, 'must reflect the retry run, not the original slow one')
@@ -763,15 +789,17 @@ test('listMyDuelHistory sorts newest-decided first', async () => {
   const secondEntryId = randomUUID()
   const secondRunId = randomUUID()
   const now = new Date().toISOString()
-  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
-  db.prepare(
-    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(secondRunId, creatorId, PARAGRAPH_ID, '[]', 5000, now)
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
+  await db.execute({
+    sql: 'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [secondRunId, creatorId, PARAGRAPH_ID, '[]', 5000, now],
+  })
   const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString()
-  db.prepare(
-    `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
+  await db.execute({
+    sql: `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
      VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
-  ).run(secondEntryId, creatorId, PARAGRAPH_ID, secondRunId, STAKE_LUNA, now, expiresAt, 'second-entry-stake-tx')
+    args: [secondEntryId, creatorId, PARAGRAPH_ID, secondRunId, STAKE_LUNA, now, expiresAt, 'second-entry-stake-tx'],
+  })
 
   const wallet = fakeSettlingWallet()
   await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'first-settle-tx' })
@@ -784,10 +812,10 @@ test('listMyDuelHistory sorts newest-decided first', async () => {
   // in-memory test (never happens for real — a settlement involves an
   // actual chain call) — pin distinct timestamps directly so the ordering
   // assertion below is about the sort, not test-environment clock timing.
-  db.prepare("UPDATE duels SET settled_at = '2026-01-01T00:00:00.000Z' WHERE entry_id = ?").run(entryId)
-  db.prepare("UPDATE duels SET settled_at = '2026-01-01T00:00:01.000Z' WHERE entry_id = ?").run(secondEntryId)
+  await db.execute({ sql: "UPDATE duels SET settled_at = '2026-01-01T00:00:00.000Z' WHERE entry_id = ?", args: [entryId] })
+  await db.execute({ sql: "UPDATE duels SET settled_at = '2026-01-01T00:00:01.000Z' WHERE entry_id = ?", args: [secondEntryId] })
 
-  const history = listMyDuelHistory(db, CREATOR_ADDRESS)
+  const history = await listMyDuelHistory(db, CREATOR_ADDRESS)
   assert.equal(history.length, 2)
   assert.equal(history[0].entryId, secondEntryId, 'the more recently settled duel should come first')
   assert.equal(history[1].entryId, entryId)

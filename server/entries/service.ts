@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
+import { isUniqueConstraintError } from '../db/client.ts'
 import type { Difficulty, EntryStatus, EntryVisibility } from '../db/types.ts'
 import { getOrCreateUser } from '../db/users.ts'
 import { getOrGenerateParagraphForStake } from '../paragraphs/repository.ts'
@@ -21,7 +22,7 @@ function stakeIdempotencyKey(stakeTxHash: string): string {
 }
 
 export async function confirmStake(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   userId: string,
   input: { nimAddress: string, stakeTxHash: string, valueLuna: number },
@@ -56,11 +57,11 @@ export type RevealResult =
  * already-generated paragraph is returned rather than a new one.
  */
 export async function revealEntry(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty },
 ): Promise<RevealResult> {
-  const userId = getOrCreateUser(db, input.nimAddress)
+  const userId = await getOrCreateUser(db, input.nimAddress)
 
   const stake = await confirmStake(db, wallet, userId, {
     ...input,
@@ -68,7 +69,7 @@ export async function revealEntry(
   })
   if (!stake.ok) return stake
 
-  const paragraph = getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
+  const paragraph = await getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
   return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
 }
 
@@ -89,7 +90,10 @@ export type CreateEntryResult =
  * Idempotent per `stakeTxHash`: one stake transaction can only ever back
  * one entry (enforced by a UNIQUE index, not just this check), so a
  * retried submit after a dropped response returns the entry that already
- * exists instead of validating the run and spending the stake again.
+ * exists instead of validating the run and spending the stake again. Two
+ * such retries racing each other resolve to a constraint error on the
+ * losing insert, which is handled the same way — re-read and return
+ * whichever entry actually got created.
  *
  * The result never includes a duration. Nobody — not even A — ever
  * receives A's own time back over the network; it stays server-side until
@@ -103,7 +107,7 @@ export type CreateEntryResult =
  * automatically either way, with no further action ever needed from A.
  */
 export async function createEntry(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: {
     nimAddress: string
@@ -114,11 +118,12 @@ export async function createEntry(
     allowRematch?: boolean
   },
 ): Promise<CreateEntryResult> {
-  const existing = db
-    .prepare('SELECT id, status, expires_at, visibility, allow_rematch FROM entries WHERE stake_tx_hash = ?')
-    .get(input.stakeTxHash) as
-    | { id: string, status: EntryStatus, expires_at: string, visibility: EntryVisibility, allow_rematch: 0 | 1 }
-    | undefined
+  type ExistingEntry = { id: string, status: EntryStatus, expires_at: string, visibility: EntryVisibility, allow_rematch: 0 | 1 }
+
+  const existing = (await db.execute({
+    sql: 'SELECT id, status, expires_at, visibility, allow_rematch FROM entries WHERE stake_tx_hash = ?',
+    args: [input.stakeTxHash],
+  })).rows[0] as unknown as ExistingEntry | undefined
   if (existing) {
     return {
       ok: true,
@@ -130,7 +135,7 @@ export async function createEntry(
     }
   }
 
-  const userId = getOrCreateUser(db, input.nimAddress)
+  const userId = await getOrCreateUser(db, input.nimAddress)
   const stakeLuna = DUEL_STAKE_LUNA_BY_DIFFICULTY[input.difficulty]
   const visibility = input.visibility ?? 'PUBLIC'
   const allowRematch = input.allowRematch ?? false
@@ -138,8 +143,8 @@ export async function createEntry(
   const stake = await confirmStake(db, wallet, userId, { ...input, valueLuna: stakeLuna })
   if (!stake.ok) return stake
 
-  const paragraph = getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
-  const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: paragraph.id, events: input.events })
+  const paragraph = await getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
+  const runResult = await submitRun(db, { nimAddress: input.nimAddress, paragraphId: paragraph.id, events: input.events })
   if (!runResult.ok) {
     return { ok: false, reason: runResult.reason }
   }
@@ -147,22 +152,41 @@ export async function createEntry(
   const entryId = randomUUID()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + DEFAULT_ENTRY_TTL_MS).toISOString()
-  db.prepare(
-    `INSERT INTO entries
+  try {
+    await db.execute({
+      sql: `INSERT INTO entries
       (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash, visibility, allow_rematch)
       VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)`,
-  ).run(
-    entryId,
-    userId,
-    paragraph.id,
-    runResult.runId,
-    stakeLuna,
-    now.toISOString(),
-    expiresAt,
-    input.stakeTxHash,
-    visibility,
-    allowRematch ? 1 : 0,
-  )
+      args: [
+        entryId,
+        userId,
+        paragraph.id,
+        runResult.runId,
+        stakeLuna,
+        now.toISOString(),
+        expiresAt,
+        input.stakeTxHash,
+        visibility,
+        allowRematch ? 1 : 0,
+      ],
+    })
+  }
+  catch (error) {
+    if (!isUniqueConstraintError(error)) throw error
+    const row = (await db.execute({
+      sql: 'SELECT id, status, expires_at, visibility, allow_rematch FROM entries WHERE stake_tx_hash = ?',
+      args: [input.stakeTxHash],
+    })).rows[0] as unknown as ExistingEntry | undefined
+    if (!row) throw error
+    return {
+      ok: true,
+      entryId: row.id,
+      status: row.status,
+      expiresAt: row.expires_at,
+      visibility: row.visibility,
+      allowRematch: row.allow_rematch === 1,
+    }
+  }
 
   return { ok: true, entryId, status: 'OPEN', expiresAt, visibility, allowRematch }
 }

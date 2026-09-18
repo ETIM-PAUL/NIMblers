@@ -20,7 +20,7 @@ bootstrap — one script once you have SSH access).
      host capacity") — if that happens, either try a different Availability
      Domain, or fall back to `VM.Standard.E2.1.Micro` (a small x86 shape,
      also Always Free). Either works fine for this app; Node, Vite, and
-     `node:sqlite` all support arm64 and x86_64.
+     `@libsql/client` all support arm64 and x86_64.
    - **Networking**: let it create a new VCN (the default quick-create flow
      does this). Note the assigned **public IP**.
    - **SSH keys**: generate one if you don't have one (`ssh-keygen -t

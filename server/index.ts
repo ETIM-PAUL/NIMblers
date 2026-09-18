@@ -40,7 +40,7 @@ if (process.env.ENABLE_INPROCESS_SWEEP === 'true') {
   const SWEEP_INTERVAL_MS = 10 * 60_000
   const runSweep = async () => {
     try {
-      const result = await runExpirySweep(getDb(), await getHouseWallet())
+      const result = await runExpirySweep(await getDb(), await getHouseWallet())
       console.log(
         `expiry sweep: released ${result.releasedLocks.length} lock(s), refunded ${result.refundedEntries.length} entr(y/ies), `
         + `settled ${result.settledAbandonedRetries.length} abandoned retr(y/ies), ${result.errors.length} error(s)`,

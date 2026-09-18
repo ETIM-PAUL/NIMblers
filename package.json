@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@faker-js/faker": "^10.6.0",
+    "@libsql/client": "^0.18.0",
     "@nimiq/core": "^2.21.0",
     "@nimiq/identicons": "^1.6.2",
     "@nimiq/mini-app-sdk": "^0.1.0",

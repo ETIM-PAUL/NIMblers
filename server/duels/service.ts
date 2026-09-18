@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 import type { Difficulty, DuelRow, EntryRow, EntryStatus, EntryVisibility } from '../db/types.ts'
 import { getOrCreateUser, getUserAddress } from '../db/users.ts'
 import { confirmStake } from '../entries/service.ts'
@@ -36,18 +36,17 @@ export interface OpenEntrySummary {
  * PRIVATE. A private entry is discoverable only through the shareable
  * link that carries its id directly; see `getEntryForChallenge`.
  */
-export function listOpenEntries(db: DatabaseSync, excludeNimAddress?: string): OpenEntrySummary[] {
+export async function listOpenEntries(db: Db, excludeNimAddress?: string): Promise<OpenEntrySummary[]> {
   const nowIso = new Date().toISOString()
-  const rows = db
-    .prepare(
-      `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at
+  const rows = (await db.execute({
+    sql: `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
        JOIN paragraphs p ON p.id = e.paragraph_id
        WHERE e.status = 'OPEN' AND e.expires_at > ? AND e.visibility = 'PUBLIC'
        ORDER BY e.created_at ASC`,
-    )
-    .all(nowIso) as { entry_id: string, creator_address: string, stake_luna: number, difficulty: Difficulty, created_at: string }[]
+    args: [nowIso],
+  })).rows as unknown as { entry_id: string, creator_address: string, stake_luna: number, difficulty: Difficulty, created_at: string }[]
 
   return rows
     .filter((row) => row.creator_address !== excludeNimAddress)
@@ -89,10 +88,9 @@ export interface MyEntrySummary {
  * itself still only happens when the sweep runs; this only corrects what
  * gets *displayed* in the meantime.
  */
-export function listMyEntries(db: DatabaseSync, nimAddress: string, now: Date = new Date()): MyEntrySummary[] {
-  const rows = db
-    .prepare(
-      `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, p.difficulty, e.status, e.visibility,
+export async function listMyEntries(db: Db, nimAddress: string, now: Date = new Date()): Promise<MyEntrySummary[]> {
+  const rows = (await db.execute({
+    sql: `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, p.difficulty, e.status, e.visibility,
               e.created_at, e.expires_at, cu.nim_address as challenger_address, d.winner_user_id, d.settled_at
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
@@ -101,8 +99,8 @@ export function listMyEntries(db: DatabaseSync, nimAddress: string, now: Date = 
        LEFT JOIN users cu ON cu.id = d.challenger_user_id
        WHERE u.nim_address = ?
        ORDER BY e.created_at DESC`,
-    )
-    .all(nimAddress) as {
+    args: [nimAddress],
+  })).rows as unknown as {
       entry_id: string
       creator_user_id: string
       stake_luna: number
@@ -191,10 +189,9 @@ function toHistoryEntry(row: HistoryRow): DuelHistoryEntry {
  * only ever set once, by whichever attempt actually decided the duel (see
  * `finalChallengerRunId`), so this needs no special-casing for it.
  */
-export function listMyDuelHistory(db: DatabaseSync, nimAddress: string): DuelHistoryEntry[] {
-  const asCreator = db
-    .prepare(
-      `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
+export async function listMyDuelHistory(db: Db, nimAddress: string): Promise<DuelHistoryEntry[]> {
+  const asCreator = (await db.execute({
+    sql: `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
               cu.nim_address as opponent_address, e.creator_user_id as my_user_id, d.winner_user_id,
               mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms, mine.events as my_events
        FROM entries e
@@ -205,12 +202,11 @@ export function listMyDuelHistory(db: DatabaseSync, nimAddress: string): DuelHis
        JOIN keystroke_runs mine ON mine.id = e.keystroke_run_id
        JOIN keystroke_runs opp ON opp.id = COALESCE(d.retry_keystroke_run_id, d.challenger_keystroke_run_id)
        WHERE u.nim_address = ? AND e.status = 'SETTLED'`,
-    )
-    .all(nimAddress) as unknown as HistoryRow[]
+    args: [nimAddress],
+  })).rows as unknown as HistoryRow[]
 
-  const asChallenger = db
-    .prepare(
-      `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
+  const asChallenger = (await db.execute({
+    sql: `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
               creator_u.nim_address as opponent_address, d.challenger_user_id as my_user_id, d.winner_user_id,
               mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms, mine.events as my_events
        FROM entries e
@@ -221,8 +217,8 @@ export function listMyDuelHistory(db: DatabaseSync, nimAddress: string): DuelHis
        JOIN keystroke_runs opp ON opp.id = e.keystroke_run_id
        JOIN keystroke_runs mine ON mine.id = COALESCE(d.retry_keystroke_run_id, d.challenger_keystroke_run_id)
        WHERE u.nim_address = ? AND e.status = 'SETTLED'`,
-    )
-    .all(nimAddress) as unknown as HistoryRow[]
+    args: [nimAddress],
+  })).rows as unknown as HistoryRow[]
 
   return [...asCreator, ...asChallenger]
     .map(toHistoryEntry)
@@ -241,16 +237,15 @@ export type EntryLookupResult =
  * make sense, so those are checked here too rather than leaving it to
  * `challengeEntry` to fail confusingly later.
  */
-export function getEntryForChallenge(db: DatabaseSync, entryId: string, excludeNimAddress?: string): EntryLookupResult {
-  const row = db
-    .prepare(
-      `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at, e.status, e.expires_at, e.visibility
+export async function getEntryForChallenge(db: Db, entryId: string, excludeNimAddress?: string): Promise<EntryLookupResult> {
+  const row = (await db.execute({
+    sql: `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at, e.status, e.expires_at, e.visibility
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
        JOIN paragraphs p ON p.id = e.paragraph_id
        WHERE e.id = ?`,
-    )
-    .get(entryId) as
+    args: [entryId],
+  })).rows[0] as unknown as
     | {
         entry_id: string
         creator_address: string
@@ -288,11 +283,12 @@ export type ChallengeResult =
 /**
  * Locks an OPEN entry for this challenger and takes B's stake before the
  * paragraph renders. The lock claim is a single conditional `UPDATE`
- * (`WHERE status = 'OPEN'`) with no `await` before it — SQLite is
- * synchronous, so two near-simultaneous challenge requests can't both see
- * `status = 'OPEN'`: exactly one `UPDATE` affects a row, the other affects
- * none. That's the whole mechanism; nothing more elaborate is needed to
- * make a race between two challengers safe.
+ * (`WHERE status = 'OPEN'`), checked via `rowsAffected`: the database
+ * itself evaluates the `WHERE` and applies the write as one atomic
+ * operation, so two near-simultaneous challenge requests can't both
+ * affect the row — exactly one `UPDATE` claims it, the other affects
+ * zero rows. That's the whole mechanism; nothing more elaborate is needed
+ * to make a race between two challengers safe.
  *
  * Idempotent for the *same* challenger retrying (matched by user id, not
  * by stake tx hash, so it doesn't matter whether the retry resends the
@@ -301,37 +297,36 @@ export type ChallengeResult =
  * already locked gets a clean rejection.
  */
 export async function challengeEntry(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { entryId: string, nimAddress: string, stakeTxHash: string },
 ): Promise<ChallengeResult> {
-  const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(input.entryId) as EntryRow | undefined
+  const entry = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as EntryRow | undefined
   if (!entry) return { ok: false, reason: 'unknown entry' }
 
-  const challengerId = getOrCreateUser(db, input.nimAddress)
+  const challengerId = await getOrCreateUser(db, input.nimAddress)
   if (challengerId === entry.creator_user_id) {
     return { ok: false, reason: 'cannot challenge your own entry' }
   }
 
-  const existingDuel = db.prepare('SELECT challenger_user_id FROM duels WHERE entry_id = ?').get(input.entryId) as
-    | { challenger_user_id: string }
-    | undefined
+  const existingDuel = (await db.execute({ sql: 'SELECT challenger_user_id FROM duels WHERE entry_id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as { challenger_user_id: string } | undefined
   if (existingDuel) {
     if (existingDuel.challenger_user_id !== challengerId) {
       return { ok: false, reason: 'entry is no longer open' }
     }
-    const paragraph = db.prepare('SELECT id, body FROM paragraphs WHERE id = ?').get(entry.paragraph_id) as {
-      id: string
-      body: string
-    }
+    const paragraph = (await db.execute({ sql: 'SELECT id, body FROM paragraphs WHERE id = ?', args: [entry.paragraph_id] }))
+      .rows[0] as unknown as { id: string, body: string }
     return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
   }
 
   const nowIso = new Date().toISOString()
-  const locked = db
-    .prepare("UPDATE entries SET status = 'LOCKED' WHERE id = ? AND status = 'OPEN' AND expires_at > ?")
-    .run(input.entryId, nowIso)
-  if (locked.changes === 0) {
+  const locked = await db.execute({
+    sql: "UPDATE entries SET status = 'LOCKED' WHERE id = ? AND status = 'OPEN' AND expires_at > ?",
+    args: [input.entryId, nowIso],
+  })
+  if (locked.rowsAffected === 0) {
     return { ok: false, reason: 'entry is no longer open' }
   }
 
@@ -341,19 +336,18 @@ export async function challengeEntry(
   const stake = await confirmStake(db, wallet, challengerId, { ...input, valueLuna: entry.stake_luna })
   if (!stake.ok) {
     // We held the lock; a failed stake releases it for someone else to try.
-    db.prepare("UPDATE entries SET status = 'OPEN' WHERE id = ?").run(input.entryId)
+    await db.execute({ sql: "UPDATE entries SET status = 'OPEN' WHERE id = ?", args: [input.entryId] })
     return stake
   }
 
-  db.prepare(
-    `INSERT INTO duels (id, entry_id, challenger_user_id, challenger_keystroke_run_id, locked_at, lock_ttl_expires_at, winner_user_id, settled_at)
+  await db.execute({
+    sql: `INSERT INTO duels (id, entry_id, challenger_user_id, challenger_keystroke_run_id, locked_at, lock_ttl_expires_at, winner_user_id, settled_at)
      VALUES (?, ?, ?, NULL, ?, ?, NULL, NULL)`,
-  ).run(randomUUID(), input.entryId, challengerId, nowIso, new Date(Date.now() + DEFAULT_LOCK_TTL_MS).toISOString())
+    args: [randomUUID(), input.entryId, challengerId, nowIso, new Date(Date.now() + DEFAULT_LOCK_TTL_MS).toISOString()],
+  })
 
-  const paragraph = db.prepare('SELECT id, body FROM paragraphs WHERE id = ?').get(entry.paragraph_id) as {
-    id: string
-    body: string
-  }
+  const paragraph = (await db.execute({ sql: 'SELECT id, body FROM paragraphs WHERE id = ?', args: [entry.paragraph_id] }))
+    .rows[0] as unknown as { id: string, body: string }
   return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
 }
 
@@ -376,10 +370,9 @@ export type SubmitChallengeResult =
   | { ok: true, pending: true, retryDeadline: string, retryStakeLuna: number }
   | { ok: false, reason: string }
 
-function getRunDuration(db: DatabaseSync, runId: string): number {
-  const row = db.prepare('SELECT duration_ms FROM keystroke_runs WHERE id = ?').get(runId) as
-    | { duration_ms: number | null }
-    | undefined
+async function getRunDuration(db: Db, runId: string): Promise<number> {
+  const row = (await db.execute({ sql: 'SELECT duration_ms FROM keystroke_runs WHERE id = ?', args: [runId] }))
+    .rows[0] as unknown as { duration_ms: number | null } | undefined
   if (!row || row.duration_ms === null) throw new Error(`run ${runId} has no recorded duration`)
   return row.duration_ms
 }
@@ -391,16 +384,19 @@ function finalChallengerRunId(duel: DuelRow): string {
 }
 
 /** Reconstructs the reveal for a duel that's already settled — a late duplicate call, or one that lost a race to another settlement path. Pure and cheap: everything it needs is already persisted. */
-function reconstructReveal(db: DatabaseSync, entry: EntryRow, duel: DuelRow): SettledReveal {
-  const creatorDurationMs = getRunDuration(db, entry.keystroke_run_id)
-  const challengerDurationMs = getRunDuration(db, finalChallengerRunId(duel))
+async function reconstructReveal(db: Db, entry: EntryRow, duel: DuelRow): Promise<SettledReveal> {
+  const creatorDurationMs = await getRunDuration(db, entry.keystroke_run_id)
+  const challengerDurationMs = await getRunDuration(db, finalChallengerRunId(duel))
   const winnerUserId = duel.winner_user_id
   const idempotencyKeys = winnerUserId === null
     ? [`refund-${duel.id}-${entry.creator_user_id}`, `refund-${duel.id}-${duel.challenger_user_id}`]
     : [`payout-${duel.id}`]
-  const txHashes = idempotencyKeys
-    .map((key) => (db.prepare('SELECT tx_hash FROM payouts WHERE idempotency_key = ?').get(key) as { tx_hash: string | null } | undefined)?.tx_hash)
-    .filter((hash): hash is string => hash !== null && hash !== undefined)
+  const txHashes: string[] = []
+  for (const key of idempotencyKeys) {
+    const row = (await db.execute({ sql: 'SELECT tx_hash FROM payouts WHERE idempotency_key = ?', args: [key] }))
+      .rows[0] as unknown as { tx_hash: string | null } | undefined
+    if (row?.tx_hash) txHashes.push(row.tx_hash)
+  }
 
   return {
     ok: true,
@@ -433,7 +429,7 @@ function reconstructReveal(db: DatabaseSync, entry: EntryRow, duel: DuelRow): Se
  * whichever attempt claimed it first.
  */
 async function finalizeSettlement(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { duelId: string, entry: EntryRow, challengerUserId: string, winnerUserId: string | null, challengerStakeLuna: number },
 ): Promise<string[]> {
@@ -450,7 +446,7 @@ async function finalizeSettlement(
 
   const txHashes: string[] = []
   for (const obligation of settlementObligations(settled)) {
-    const recipientAddress = getUserAddress(db, obligation.userId)
+    const recipientAddress = await getUserAddress(db, obligation.userId)
     const record =
       input.winnerUserId === null
         ? await refund(db, wallet, {
@@ -468,9 +464,11 @@ async function finalizeSettlement(
     if (record.txHash) txHashes.push(record.txHash)
   }
 
-  db.prepare("UPDATE duels SET winner_user_id = ?, settled_at = ? WHERE id = ? AND settled_at IS NULL")
-    .run(input.winnerUserId, new Date().toISOString(), input.duelId)
-  db.prepare("UPDATE entries SET status = 'SETTLED' WHERE id = ?").run(input.entry.id)
+  await db.execute({
+    sql: "UPDATE duels SET winner_user_id = ?, settled_at = ? WHERE id = ? AND settled_at IS NULL",
+    args: [input.winnerUserId, new Date().toISOString(), input.duelId],
+  })
+  await db.execute({ sql: "UPDATE entries SET status = 'SETTLED' WHERE id = ?", args: [input.entry.id] })
 
   return txHashes
 }
@@ -508,17 +506,19 @@ function buildSettledReveal(
  * just the first attempt.
  */
 export async function submitChallenge(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { entryId: string, nimAddress: string, events: KeystrokeEvent[] },
 ): Promise<SubmitChallengeResult> {
-  const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(input.entryId) as EntryRow | undefined
+  const entry = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as EntryRow | undefined
   if (!entry) return { ok: false, reason: 'unknown entry' }
 
-  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(input.entryId) as DuelRow | undefined
+  const duel = (await db.execute({ sql: 'SELECT * FROM duels WHERE entry_id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as DuelRow | undefined
   if (!duel) return { ok: false, reason: 'entry has not been challenged' }
 
-  const challengerId = getOrCreateUser(db, input.nimAddress)
+  const challengerId = await getOrCreateUser(db, input.nimAddress)
   if (challengerId !== duel.challenger_user_id) {
     return { ok: false, reason: 'only the challenger can submit a run for this entry' }
   }
@@ -530,14 +530,14 @@ export async function submitChallenge(
 
   let challengerRunId = duel.challenger_keystroke_run_id
   if (!challengerRunId) {
-    const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: entry.paragraph_id, events: input.events })
+    const runResult = await submitRun(db, { nimAddress: input.nimAddress, paragraphId: entry.paragraph_id, events: input.events })
     if (!runResult.ok) return { ok: false, reason: runResult.reason }
     challengerRunId = runResult.runId
-    db.prepare('UPDATE duels SET challenger_keystroke_run_id = ? WHERE entry_id = ?').run(challengerRunId, input.entryId)
+    await db.execute({ sql: 'UPDATE duels SET challenger_keystroke_run_id = ? WHERE entry_id = ?', args: [challengerRunId, input.entryId] })
   }
 
-  const creatorDurationMs = getRunDuration(db, entry.keystroke_run_id)
-  const challengerDurationMs = getRunDuration(db, challengerRunId)
+  const creatorDurationMs = await getRunDuration(db, entry.keystroke_run_id)
+  const challengerDurationMs = await getRunDuration(db, challengerRunId)
   const winnerUserId =
     creatorDurationMs === challengerDurationMs
       ? null
@@ -547,7 +547,7 @@ export async function submitChallenge(
 
   if (winnerUserId === entry.creator_user_id && entry.allow_rematch) {
     const retryDeadline = new Date(Date.now() + RETRY_DECISION_WINDOW_MS).toISOString()
-    db.prepare('UPDATE duels SET retry_offer_expires_at = ? WHERE id = ?').run(retryDeadline, duel.id)
+    await db.execute({ sql: 'UPDATE duels SET retry_offer_expires_at = ? WHERE id = ?', args: [retryDeadline, duel.id] })
     return { ok: true, pending: true, retryDeadline, retryStakeLuna: entry.stake_luna * 2 }
   }
 
@@ -573,16 +573,18 @@ export type RetryStakeResult = { ok: true } | { ok: false, reason: string }
  * is verified" rule the rest of the app follows.
  */
 export async function retryStake(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { entryId: string, nimAddress: string, stakeTxHash: string },
 ): Promise<RetryStakeResult> {
-  const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(input.entryId) as EntryRow | undefined
+  const entry = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as EntryRow | undefined
   if (!entry) return { ok: false, reason: 'unknown entry' }
-  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(input.entryId) as DuelRow | undefined
+  const duel = (await db.execute({ sql: 'SELECT * FROM duels WHERE entry_id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as DuelRow | undefined
   if (!duel) return { ok: false, reason: 'entry has not been challenged' }
 
-  const challengerId = getOrCreateUser(db, input.nimAddress)
+  const challengerId = await getOrCreateUser(db, input.nimAddress)
   if (challengerId !== duel.challenger_user_id) return { ok: false, reason: 'only the challenger can retry this duel' }
   if (duel.settled_at) return { ok: false, reason: 'this duel has already been resolved' }
   if (!duel.retry_offer_expires_at) return { ok: false, reason: 'no retry is available for this duel' }
@@ -605,16 +607,18 @@ export async function retryStake(
  * the client skipped straight here.
  */
 export async function retrySubmit(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { entryId: string, nimAddress: string, stakeTxHash: string, events: KeystrokeEvent[] },
 ): Promise<SubmitChallengeResult> {
-  const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(input.entryId) as EntryRow | undefined
+  const entry = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as EntryRow | undefined
   if (!entry) return { ok: false, reason: 'unknown entry' }
-  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(input.entryId) as DuelRow | undefined
+  const duel = (await db.execute({ sql: 'SELECT * FROM duels WHERE entry_id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as DuelRow | undefined
   if (!duel) return { ok: false, reason: 'entry has not been challenged' }
 
-  const challengerId = getOrCreateUser(db, input.nimAddress)
+  const challengerId = await getOrCreateUser(db, input.nimAddress)
   if (challengerId !== duel.challenger_user_id) return { ok: false, reason: 'only the challenger can retry this duel' }
   if (duel.settled_at) return reconstructReveal(db, entry, duel)
   if (!duel.retry_offer_expires_at) return { ok: false, reason: 'no retry is available for this duel' }
@@ -630,14 +634,14 @@ export async function retrySubmit(
     })
     if (!stake.ok) return stake
 
-    const runResult = submitRun(db, { nimAddress: input.nimAddress, paragraphId: entry.paragraph_id, events: input.events })
+    const runResult = await submitRun(db, { nimAddress: input.nimAddress, paragraphId: entry.paragraph_id, events: input.events })
     if (!runResult.ok) return { ok: false, reason: runResult.reason }
     retryRunId = runResult.runId
-    db.prepare('UPDATE duels SET retry_keystroke_run_id = ? WHERE id = ?').run(retryRunId, duel.id)
+    await db.execute({ sql: 'UPDATE duels SET retry_keystroke_run_id = ? WHERE id = ?', args: [retryRunId, duel.id] })
   }
 
-  const creatorDurationMs = getRunDuration(db, entry.keystroke_run_id)
-  const challengerDurationMs = getRunDuration(db, retryRunId)
+  const creatorDurationMs = await getRunDuration(db, entry.keystroke_run_id)
+  const challengerDurationMs = await getRunDuration(db, retryRunId)
   const winnerUserId =
     creatorDurationMs === challengerDurationMs
       ? null
@@ -662,16 +666,18 @@ export async function retrySubmit(
  * handles on a timeout, for whoever really does just walk away).
  */
 export async function declineRetry(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { entryId: string, nimAddress: string },
 ): Promise<SubmitChallengeResult> {
-  const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(input.entryId) as EntryRow | undefined
+  const entry = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as EntryRow | undefined
   if (!entry) return { ok: false, reason: 'unknown entry' }
-  const duel = db.prepare('SELECT * FROM duels WHERE entry_id = ?').get(input.entryId) as DuelRow | undefined
+  const duel = (await db.execute({ sql: 'SELECT * FROM duels WHERE entry_id = ?', args: [input.entryId] }))
+    .rows[0] as unknown as DuelRow | undefined
   if (!duel) return { ok: false, reason: 'entry has not been challenged' }
 
-  const challengerId = getOrCreateUser(db, input.nimAddress)
+  const challengerId = await getOrCreateUser(db, input.nimAddress)
   if (challengerId !== duel.challenger_user_id) return { ok: false, reason: "only the challenger can decline this duel's retry" }
   if (duel.settled_at) return reconstructReveal(db, entry, duel)
   if (!duel.retry_offer_expires_at) return { ok: false, reason: 'no retry is pending for this duel' }
@@ -687,13 +693,14 @@ export async function declineRetry(
  * whoever just walks away instead of tapping anything).
  */
 export async function settleAbandonedRetry(
-  db: DatabaseSync,
+  db: Db,
   wallet: HouseWallet,
   input: { duelId: string, entry: EntryRow, challengerUserId: string },
 ): Promise<SettledReveal> {
-  const duel = db.prepare('SELECT * FROM duels WHERE id = ?').get(input.duelId) as unknown as DuelRow
-  const creatorDurationMs = getRunDuration(db, input.entry.keystroke_run_id)
-  const challengerDurationMs = getRunDuration(db, duel.challenger_keystroke_run_id!)
+  const duel = (await db.execute({ sql: 'SELECT * FROM duels WHERE id = ?', args: [input.duelId] }))
+    .rows[0] as unknown as DuelRow
+  const creatorDurationMs = await getRunDuration(db, input.entry.keystroke_run_id)
+  const challengerDurationMs = await getRunDuration(db, duel.challenger_keystroke_run_id!)
 
   const txHashes = await finalizeSettlement(db, wallet, {
     duelId: input.duelId,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../server/db/client.ts'
 import type { PayoutType } from '../server/db/types.ts'
 import type { HouseWallet } from './nimiqWallet.ts'
 
@@ -15,9 +15,9 @@ export { createHouseWallet } from './nimiqWallet.ts'
  * holds real funds and this module is the sole gateway to it.
  *
  * Every movement is written to `payouts`, keyed by an idempotency key that
- * is claimed atomically (a plain synchronous INSERT, before any `await`)
- * so a retry — concurrent or sequential — can never send twice, only ever
- * return the first result.
+ * is claimed atomically (a single `INSERT` against a `UNIQUE` column,
+ * enforced by the database itself) so a retry — concurrent or sequential
+ * — can never send twice, only ever return the first result.
  */
 
 export interface PayoutRecord {
@@ -60,28 +60,27 @@ function toPayoutRecord(row: PayoutRow): PayoutRecord {
   }
 }
 
-function findByIdempotencyKey(db: DatabaseSync, idempotencyKey: string): PayoutRecord | null {
-  const row = db.prepare('SELECT * FROM payouts WHERE idempotency_key = ?').get(idempotencyKey) as
-    | PayoutRow
-    | undefined
+async function findByIdempotencyKey(db: Db, idempotencyKey: string): Promise<PayoutRecord | null> {
+  const row = (await db.execute({ sql: 'SELECT * FROM payouts WHERE idempotency_key = ?', args: [idempotencyKey] }))
+    .rows[0] as unknown as PayoutRow | undefined
   return row ? toPayoutRecord(row) : null
 }
 
 /**
- * Synchronously claims an idempotency key by inserting a placeholder row
- * (no `tx_hash` yet). Because this runs with no `await` in between the
- * uniqueness check (the DB's own `UNIQUE` constraint) and the insert,
- * there's no window for two concurrent calls to both believe they got the
- * key — SQLite raises on the second `INSERT`, not after both already sent
- * money.
+ * Claims an idempotency key by inserting a placeholder row (no `tx_hash`
+ * yet). `idempotency_key` is `UNIQUE`, and the insert is a single
+ * statement the database evaluates atomically — there's no window for two
+ * concurrent calls to both believe they got the key — so the second
+ * `INSERT` raises, not after both already sent money.
  */
-function tryClaim(db: DatabaseSync, idempotencyKey: string, userId: string, type: PayoutType, amountLuna: number): string | null {
+async function tryClaim(db: Db, idempotencyKey: string, userId: string, type: PayoutType, amountLuna: number): Promise<string | null> {
   const id = randomUUID()
   try {
-    db.prepare(
-      `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
+    await db.execute({
+      sql: `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(id, idempotencyKey, userId, type, amountLuna, new Date().toISOString())
+      args: [id, idempotencyKey, userId, type, amountLuna, new Date().toISOString()],
+    })
     return id
   }
   catch {
@@ -96,14 +95,14 @@ function tryClaim(db: DatabaseSync, idempotencyKey: string, userId: string, type
  * throws, the claim is released so the same key can be retried.
  */
 async function claimAndRecord(
-  db: DatabaseSync,
+  db: Db,
   input: { idempotencyKey: string, userId: string, type: PayoutType, amountLuna: number },
   fulfill: () => Promise<string>,
 ): Promise<PayoutRecord> {
-  const claimedId = tryClaim(db, input.idempotencyKey, input.userId, input.type, input.amountLuna)
+  const claimedId = await tryClaim(db, input.idempotencyKey, input.userId, input.type, input.amountLuna)
 
   if (claimedId === null) {
-    const existing = findByIdempotencyKey(db, input.idempotencyKey)
+    const existing = await findByIdempotencyKey(db, input.idempotencyKey)
     if (existing && existing.txHash !== null) return existing
     throw new Error(
       `Idempotency key "${input.idempotencyKey}" is already claimed but not yet fulfilled — ` +
@@ -113,11 +112,11 @@ async function claimAndRecord(
 
   try {
     const txHash = await fulfill()
-    db.prepare('UPDATE payouts SET tx_hash = ? WHERE id = ?').run(txHash, claimedId)
+    await db.execute({ sql: 'UPDATE payouts SET tx_hash = ? WHERE id = ?', args: [txHash, claimedId] })
     return { id: claimedId, idempotencyKey: input.idempotencyKey, userId: input.userId, type: input.type, amountLuna: input.amountLuna, txHash }
   }
   catch (error) {
-    db.prepare('DELETE FROM payouts WHERE id = ?').run(claimedId)
+    await db.execute({ sql: 'DELETE FROM payouts WHERE id = ?', args: [claimedId] })
     throw error
   }
 }
@@ -174,7 +173,7 @@ async function waitForTransaction(
  * transaction contains. It re-fetches the transaction from the chain and
  * checks every field itself before writing anything.
  */
-export function receiveStake(db: DatabaseSync, wallet: HouseWallet, input: ReceiveStakeInput): Promise<PayoutRecord> {
+export function receiveStake(db: Db, wallet: HouseWallet, input: ReceiveStakeInput): Promise<PayoutRecord> {
   return claimAndRecord(
     db,
     { idempotencyKey: input.idempotencyKey, userId: input.userId, type: 'STAKE_RECEIVED', amountLuna: input.valueLuna },
@@ -209,7 +208,7 @@ interface SendInput {
   valueLuna: number
 }
 
-function sendAndRecord(db: DatabaseSync, wallet: HouseWallet, type: 'PAYOUT' | 'REFUND', input: SendInput): Promise<PayoutRecord> {
+function sendAndRecord(db: Db, wallet: HouseWallet, type: 'PAYOUT' | 'REFUND', input: SendInput): Promise<PayoutRecord> {
   return claimAndRecord(
     db,
     { idempotencyKey: input.idempotencyKey, userId: input.userId, type, amountLuna: input.valueLuna },
@@ -221,11 +220,11 @@ function sendAndRecord(db: DatabaseSync, wallet: HouseWallet, type: 'PAYOUT' | '
 }
 
 /** Pays a duel's winner. Calling this twice with the same idempotency key sends once. */
-export function payout(db: DatabaseSync, wallet: HouseWallet, input: SendInput): Promise<PayoutRecord> {
+export function payout(db: Db, wallet: HouseWallet, input: SendInput): Promise<PayoutRecord> {
   return sendAndRecord(db, wallet, 'PAYOUT', input)
 }
 
 /** Refunds a stake. Calling this twice with the same idempotency key sends once. */
-export function refund(db: DatabaseSync, wallet: HouseWallet, input: SendInput): Promise<PayoutRecord> {
+export function refund(db: Db, wallet: HouseWallet, input: SendInput): Promise<PayoutRecord> {
   return sendAndRecord(db, wallet, 'REFUND', input)
 }

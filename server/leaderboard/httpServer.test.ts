@@ -19,7 +19,7 @@ let baseUrl: string
 
 before(async () => {
   closeDb()
-  migrateUp()
+  await migrateUp()
   const router = createRouter()
   registerLeaderboardRoutes(router)
   server = router.server
@@ -28,22 +28,24 @@ before(async () => {
   baseUrl = `http://localhost:${port}`
 })
 
-beforeEach(() => {
-  const db = getDb()
-  db.prepare('DELETE FROM payouts').run()
-  db.prepare('DELETE FROM users').run()
+beforeEach(async () => {
+  const db = await getDb()
+  await db.execute('DELETE FROM payouts')
+  await db.execute('DELETE FROM users')
 
-  const alice = getOrCreateUser(db, ALICE)
-  const bob = getOrCreateUser(db, BOB)
+  const alice = await getOrCreateUser(db, ALICE)
+  const bob = await getOrCreateUser(db, BOB)
   const now = new Date().toISOString()
-  db.prepare(
-    `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
+  await db.execute({
+    sql: `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
      VALUES (?, ?, ?, 'PAYOUT', ?, ?, ?)`,
-  ).run(randomUUID(), randomUUID(), alice, 180_000, `tx-${randomUUID()}`, now)
-  db.prepare(
-    `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
+    args: [randomUUID(), randomUUID(), alice, 180_000, `tx-${randomUUID()}`, now],
+  })
+  await db.execute({
+    sql: `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
      VALUES (?, ?, ?, 'PAYOUT', ?, ?, ?)`,
-  ).run(randomUUID(), randomUUID(), bob, 900_000, `tx-${randomUUID()}`, now)
+    args: [randomUUID(), randomUUID(), bob, 900_000, `tx-${randomUUID()}`, now],
+  })
 })
 
 after(async () => {

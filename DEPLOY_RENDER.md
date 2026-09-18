@@ -5,8 +5,10 @@ compute capacity is currently exhausted in this account's region for both
 free shapes — a known, common, and unpredictable issue with no fixed
 timeline. Render's free plan has no capacity roulette and no budget ceiling
 (unlike Railway's $1/month credit), at the cost of an ephemeral disk and a
-sleep-after-15-minutes-idle behavior — both addressed below, and both fine
-for a hackathon demo where nobody needs duel history to survive for weeks.
+sleep-after-15-minutes-idle behavior. The disk problem is solved by using a
+hosted database (Turso) instead of a local file — see step 3 and "About the
+database" below; the sleep/cold-start behavior is addressed separately in
+step 5.
 
 This deploys the API and the built frontend as **one Render Web Service** —
 the server now serves `dist/` directly (see `server/http/router.ts`'s
@@ -41,6 +43,8 @@ key ever gets committed. In the service's **Environment** tab, add:
 - `NIMIQ_RPC_URL`
 - `NIMIQ_RPC_USERNAME` (if your RPC node needs one)
 - `NIMIQ_RPC_PASSWORD` (if your RPC node needs one)
+- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` — see "About the database"
+  below for where these come from
 
 Same values as your local `.env` — see `.env.example` for what each one is.
 Saving these triggers a redeploy automatically.
@@ -75,14 +79,31 @@ duration of the judging period.
 
 ## About the database on Render's free tier
 
-Render's free plan has **no persistent disk** — `server/db/data.sqlite`
-lives on the container's own ephemeral storage and resets on redeploy or on
-a sleep→wake cycle. As long as the uptime pinger above keeps it awake, nothing
-resets while it's actively being demoed; a real reset only happens if you
-push a new deploy or the service happens to restart. For a hackathon demo
-that doesn't need weeks of accumulated duel history, this is a non-issue —
-if you later want the data to genuinely persist long-term, that's what the
-Oracle VM route (DEPLOY.md) or Render's paid tier with a disk are for.
+Render's free plan has **no persistent disk** — a local file like
+`server/db/data.sqlite` would live on the container's own ephemeral storage
+and be wiped on every redeploy or sleep→wake cycle. `server/db/client.ts`
+avoids that by talking to a hosted [Turso](https://turso.tech) (libSQL)
+database instead whenever `TURSO_DATABASE_URL` is set, so duel/leaderboard/
+history data survives restarts and cold starts like any normal production
+database.
+
+To set one up:
+
+```bash
+curl -sSfL https://get.tur.so/install.sh | bash   # installs the Turso CLI
+turso auth login                                  # opens a browser
+turso db create nimblers
+turso db show nimblers --url                      # -> TURSO_DATABASE_URL
+turso db tokens create nimblers                   # -> TURSO_AUTH_TOKEN
+```
+
+Add both values in Render's **Environment** tab (step 3). The build command
+in `render.yaml` already runs `npm run db:migrate`, which applies the schema
+to whichever database `TURSO_DATABASE_URL` points at.
+
+Local dev and `npm test` need none of this — leaving `TURSO_DATABASE_URL`
+unset falls back to a local SQLite file (or `:memory:` for tests), so there's
+nothing to configure just to run the app on your own machine.
 
 ## Redeploying after a code change
 

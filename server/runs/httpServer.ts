@@ -34,13 +34,18 @@ export function registerRunRoutes(router: Router): void {
       return
     }
 
-    const result = submitRun(getDb(), { nimAddress: body.nimAddress, paragraphId: body.paragraphId, events })
-    if (!result.ok) {
-      sendJson(res, 422, { error: result.reason })
-      return
-    }
+    try {
+      const result = await submitRun(await getDb(), { nimAddress: body.nimAddress, paragraphId: body.paragraphId, events })
+      if (!result.ok) {
+        sendJson(res, 422, { error: result.reason })
+        return
+      }
 
-    sendJson(res, 201, { runId: result.runId, durationMs: result.durationMs, flags: result.flags })
+      sendJson(res, 201, { runId: result.runId, durationMs: result.durationMs, flags: result.flags })
+    }
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
   })
 }
 

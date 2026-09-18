@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 
 export interface LeaderboardEntry {
   rank: number
@@ -46,18 +46,17 @@ export function startOfWeekUtc(date: Date): Date {
  * Stakes and refunds never appear here — this tracks winnings, not
  * activity or losses.
  */
-export function getLeaderboard(db: DatabaseSync, limit: number = DEFAULT_LEADERBOARD_LIMIT, now: Date = new Date()): LeaderboardEntry[] {
-  const rows = db
-    .prepare(
-      `SELECT u.nim_address as nim_address, SUM(p.amount_luna) as total_won_luna, COUNT(*) as wins
+export async function getLeaderboard(db: Db, limit: number = DEFAULT_LEADERBOARD_LIMIT, now: Date = new Date()): Promise<LeaderboardEntry[]> {
+  const rows = (await db.execute({
+    sql: `SELECT u.nim_address as nim_address, SUM(p.amount_luna) as total_won_luna, COUNT(*) as wins
        FROM payouts p
        JOIN users u ON u.id = p.user_id
        WHERE p.type = 'PAYOUT' AND p.tx_hash IS NOT NULL AND p.created_at >= ?
        GROUP BY p.user_id
        ORDER BY total_won_luna DESC, wins DESC
        LIMIT ?`,
-    )
-    .all(startOfWeekUtc(now).toISOString(), limit) as unknown as LeaderboardRow[]
+    args: [startOfWeekUtc(now).toISOString(), limit],
+  })).rows as unknown as LeaderboardRow[]
 
   return rows.map((row, index) => ({
     rank: index + 1,

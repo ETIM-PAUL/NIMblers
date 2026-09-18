@@ -1,4 +1,4 @@
-import type { DatabaseSync } from 'node:sqlite'
+import type { Db } from '../db/client.ts'
 import type { EntryRow } from '../db/types.ts'
 import type { HouseWallet } from '../../services/escrow.ts'
 import { refund } from '../../services/escrow.ts'
@@ -61,20 +61,19 @@ interface AbandonedRetryRow {
  * challenged" regardless of the entry's own status, so a stale row left
  * behind would wrongly reject every future challenger.
  */
-export async function runExpirySweep(db: DatabaseSync, wallet: HouseWallet, now: Date = new Date()): Promise<ExpirySweepResult> {
+export async function runExpirySweep(db: Db, wallet: HouseWallet, now: Date = new Date()): Promise<ExpirySweepResult> {
   const nowIso = now.toISOString()
   const nowMs = now.getTime()
   const result: ExpirySweepResult = { releasedLocks: [], refundedEntries: [], settledAbandonedRetries: [], errors: [] }
 
-  const staleLocks = db
-    .prepare(
-      `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, e.expires_at,
+  const staleLocks = (await db.execute({
+    sql: `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, e.expires_at,
               d.id as duel_id, d.challenger_user_id, d.lock_ttl_expires_at
        FROM entries e
        JOIN duels d ON d.entry_id = e.id
        WHERE e.status = 'LOCKED' AND d.lock_ttl_expires_at <= ? AND d.challenger_keystroke_run_id IS NULL`,
-    )
-    .all(nowIso) as unknown as StaleLockRow[]
+    args: [nowIso],
+  })).rows as unknown as StaleLockRow[]
 
   for (const row of staleLocks) {
     const locked: LockedDuel = {
@@ -89,16 +88,17 @@ export async function runExpirySweep(db: DatabaseSync, wallet: HouseWallet, now:
     const next = applyDuelEvent(locked, { type: 'LOCK_TTL_EXPIRED', now: nowMs })
     if (next.status !== 'OPEN') continue // clock-skew guard: SQL's "now" said past TTL, the reducer disagreed
 
-    const claimed = db.prepare("UPDATE entries SET status = 'OPEN' WHERE id = ? AND status = 'LOCKED'").run(row.entry_id)
-    if (claimed.changes === 0) continue // already released by a concurrent or earlier run
+    const claimed = await db.execute({ sql: "UPDATE entries SET status = 'OPEN' WHERE id = ? AND status = 'LOCKED'", args: [row.entry_id] })
+    if (claimed.rowsAffected === 0) continue // already released by a concurrent or earlier run
 
-    db.prepare('DELETE FROM duels WHERE id = ?').run(row.duel_id)
+    await db.execute({ sql: 'DELETE FROM duels WHERE id = ?', args: [row.duel_id] })
     result.releasedLocks.push(row.entry_id)
   }
 
-  const expiredEntries = db
-    .prepare("SELECT id as entry_id, creator_user_id, stake_luna, expires_at FROM entries WHERE status = 'OPEN' AND expires_at <= ?")
-    .all(nowIso) as unknown as OpenEntryRow[]
+  const expiredEntries = (await db.execute({
+    sql: "SELECT id as entry_id, creator_user_id, stake_luna, expires_at FROM entries WHERE status = 'OPEN' AND expires_at <= ?",
+    args: [nowIso],
+  })).rows as unknown as OpenEntryRow[]
 
   for (const row of expiredEntries) {
     const open: OpenDuel = {
@@ -111,23 +111,24 @@ export async function runExpirySweep(db: DatabaseSync, wallet: HouseWallet, now:
     const next = applyDuelEvent(open, { type: 'ENTRY_EXPIRED', now: nowMs })
     if (next.status !== 'EXPIRED') continue
 
-    const claimed = db
-      .prepare("UPDATE entries SET status = 'EXPIRED' WHERE id = ? AND status = 'OPEN' AND expires_at <= ?")
-      .run(row.entry_id, nowIso)
-    if (claimed.changes === 0) continue // already handled by a concurrent or earlier run
+    const claimed = await db.execute({
+      sql: "UPDATE entries SET status = 'EXPIRED' WHERE id = ? AND status = 'OPEN' AND expires_at <= ?",
+      args: [row.entry_id, nowIso],
+    })
+    if (claimed.rowsAffected === 0) continue // already handled by a concurrent or earlier run
 
     const [obligation] = settlementObligations(next)
     try {
       await refund(db, wallet, {
         idempotencyKey: `refund-expired-${row.entry_id}`,
         userId: obligation.userId,
-        recipientAddress: getUserAddress(db, obligation.userId),
+        recipientAddress: await getUserAddress(db, obligation.userId),
         valueLuna: obligation.amountLuna,
       })
       result.refundedEntries.push(row.entry_id)
     }
     catch (error) {
-      db.prepare("UPDATE entries SET status = 'OPEN' WHERE id = ?").run(row.entry_id)
+      await db.execute({ sql: "UPDATE entries SET status = 'OPEN' WHERE id = ?", args: [row.entry_id] })
       result.errors.push({ entryId: row.entry_id, reason: error instanceof Error ? error.message : String(error) })
     }
   }
@@ -138,18 +139,18 @@ export async function runExpirySweep(db: DatabaseSync, wallet: HouseWallet, now:
   // claim: it's also how `retrySubmit`/`declineRetry` recognize a duel as
   // still theirs to settle, so once any of the three sets it (or
   // `settled_at`), the others no longer match this query.
-  const abandonedRetries = db
-    .prepare(
-      `SELECT d.entry_id as entry_id, d.id as duel_id, d.challenger_user_id
+  const abandonedRetries = (await db.execute({
+    sql: `SELECT d.entry_id as entry_id, d.id as duel_id, d.challenger_user_id
        FROM duels d
        WHERE d.retry_offer_expires_at IS NOT NULL AND d.retry_offer_expires_at <= ?
          AND d.settled_at IS NULL AND d.retry_keystroke_run_id IS NULL`,
-    )
-    .all(nowIso) as unknown as AbandonedRetryRow[]
+    args: [nowIso],
+  })).rows as unknown as AbandonedRetryRow[]
 
   for (const row of abandonedRetries) {
     try {
-      const entry = db.prepare('SELECT * FROM entries WHERE id = ?').get(row.entry_id) as unknown as EntryRow
+      const entry = (await db.execute({ sql: 'SELECT * FROM entries WHERE id = ?', args: [row.entry_id] }))
+        .rows[0] as unknown as EntryRow
       await settleAbandonedRetry(db, wallet, { duelId: row.duel_id, entry, challengerUserId: row.challenger_user_id })
       result.settledAbandonedRetries.push(row.entry_id)
     }

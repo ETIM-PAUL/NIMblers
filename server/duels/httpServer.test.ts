@@ -45,7 +45,7 @@ let entryId: string
 
 before(async () => {
   closeDb()
-  migrateUp()
+  await migrateUp()
   const router = createRouter()
   registerDuelRoutes(router)
   server = router.server
@@ -54,34 +54,34 @@ before(async () => {
   baseUrl = `http://localhost:${port}`
 })
 
-beforeEach(() => {
+beforeEach(async () => {
   setHouseWalletForTesting(fakeWallet())
-  const db = getDb()
-  db.prepare('DELETE FROM payouts').run()
-  db.prepare('DELETE FROM duels').run()
-  db.prepare('DELETE FROM entries').run()
-  db.prepare('DELETE FROM keystroke_runs').run()
-  db.prepare('DELETE FROM paragraphs').run()
-  db.prepare('DELETE FROM users').run()
+  const db = await getDb()
+  await db.execute('DELETE FROM payouts')
+  await db.execute('DELETE FROM duels')
+  await db.execute('DELETE FROM entries')
+  await db.execute('DELETE FROM keystroke_runs')
+  await db.execute('DELETE FROM paragraphs')
+  await db.execute('DELETE FROM users')
 
   const now = new Date().toISOString()
-  db.prepare('INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)').run(
-    PARAGRAPH_ID,
-    TARGET,
-    'easy',
-    now,
-  )
-  const creatorId = getOrCreateUser(db, CREATOR_ADDRESS)
+  await db.execute({
+    sql: 'INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
+    args: [PARAGRAPH_ID, TARGET, 'easy', now],
+  })
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
   const runId = randomUUID()
-  db.prepare(
-    'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(runId, creatorId, PARAGRAPH_ID, '[]', 5000, now)
+  await db.execute({
+    sql: 'INSERT INTO keystroke_runs (id, user_id, paragraph_id, events, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [runId, creatorId, PARAGRAPH_ID, '[]', 5000, now],
+  })
   entryId = randomUUID()
   const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString()
-  db.prepare(
-    `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
+  await db.execute({
+    sql: `INSERT INTO entries (id, creator_user_id, paragraph_id, keystroke_run_id, stake_luna, status, created_at, expires_at, stake_tx_hash)
      VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)`,
-  ).run(entryId, creatorId, PARAGRAPH_ID, runId, STAKE_LUNA, now, expiresAt, `creator-stake-${entryId}`)
+    args: [entryId, creatorId, PARAGRAPH_ID, runId, STAKE_LUNA, now, expiresAt, `creator-stake-${entryId}`],
+  })
 })
 
 after(async () => {
@@ -108,14 +108,16 @@ test('GET /api/entries?exclude=<address> hides that address\'s own entries', asy
 })
 
 test('GET /api/entries excludes a PRIVATE entry from the dashboard listing', async () => {
-  getDb().prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  const db = await getDb()
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
   const res = await fetch(`${baseUrl}/api/entries`)
   const body = (await res.json()) as { entries: unknown[] }
   assert.equal(body.entries.length, 0)
 })
 
 test('GET /api/entries/lookup finds a PRIVATE entry by id, even though it is hidden from the dashboard', async () => {
-  getDb().prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  const db = await getDb()
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
 
   const res = await fetch(`${baseUrl}/api/entries/lookup?entryId=${encodeURIComponent(entryId)}`)
   assert.equal(res.status, 200)
@@ -136,7 +138,8 @@ test('GET /api/entries/lookup 400s without an entryId', async () => {
 })
 
 test('a PRIVATE entry found via lookup can be challenged through the normal flow', async () => {
-  getDb().prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
+  const db = await getDb()
+  await db.execute({ sql: "UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?", args: [entryId] })
 
   const lookup = await fetch(`${baseUrl}/api/entries/lookup?entryId=${encodeURIComponent(entryId)}`)
   const { entry } = (await lookup.json()) as { entry: { entryId: string } }
@@ -179,8 +182,9 @@ test('two simultaneous HTTP challenge requests on the same entry produce one loc
   const statuses = [resA.status, resB.status].sort()
   assert.deepEqual(statuses, [200, 409], `expected one 200 and one 409, got ${statuses}`)
 
-  const db = getDb()
-  const duelCount = db.prepare('SELECT COUNT(*) c FROM duels WHERE entry_id = ?').get(entryId) as { c: number }
+  const db = await getDb()
+  const duelCount = (await db.execute({ sql: 'SELECT COUNT(*) c FROM duels WHERE entry_id = ?', args: [entryId] }))
+    .rows[0] as unknown as { c: number }
   assert.equal(duelCount.c, 1)
 })
 
@@ -247,7 +251,8 @@ function fastEvents(): { key: string, tRelativeMs: number, resultingLength: numb
 }
 
 test('POST /api/entries/challenge/submit returns a pending decision on a loss when the entry allows a rematch, with no duration anywhere', async () => {
-  getDb().prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const db = await getDb()
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   await fetch(`${baseUrl}/api/entries/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -269,7 +274,8 @@ test('POST /api/entries/challenge/submit returns a pending decision on a loss wh
 })
 
 test('the full double-trial flow: lose, retry, win — settles at the 4x pot', async () => {
-  getDb().prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const db = await getDb()
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   await fetch(`${baseUrl}/api/entries/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -298,13 +304,15 @@ test('the full double-trial flow: lose, retry, win — settles at the 4x pot', a
   assert.equal(body.pending, false)
   assert.equal(body.outcome, 'challenger')
 
-  const winnerId = getOrCreateUser(getDb(), CHALLENGER_ADDRESS)
-  const payoutRow = getDb().prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(winnerId) as { amount_luna: number }
+  const winnerId = await getOrCreateUser(db, CHALLENGER_ADDRESS)
+  const payoutRow = (await db.execute({ sql: "SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?", args: [winnerId] }))
+    .rows[0] as unknown as { amount_luna: number }
   assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 4 * 0.9))
 })
 
 test('declining the retry settles immediately at the original 2x pot', async () => {
-  getDb().prepare('UPDATE entries SET allow_rematch = 1 WHERE id = ?').run(entryId)
+  const db = await getDb()
+  await db.execute({ sql: 'UPDATE entries SET allow_rematch = 1 WHERE id = ?', args: [entryId] })
   await fetch(`${baseUrl}/api/entries/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -326,8 +334,9 @@ test('declining the retry settles immediately at the original 2x pot', async () 
   assert.equal(body.pending, false)
   assert.equal(body.outcome, 'creator')
 
-  const creatorId = getOrCreateUser(getDb(), CREATOR_ADDRESS)
-  const payoutRow = getDb().prepare("SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?").get(creatorId) as { amount_luna: number }
+  const creatorId = await getOrCreateUser(db, CREATOR_ADDRESS)
+  const payoutRow = (await db.execute({ sql: "SELECT amount_luna FROM payouts WHERE type = 'PAYOUT' AND user_id = ?", args: [creatorId] }))
+    .rows[0] as unknown as { amount_luna: number }
   assert.equal(payoutRow.amount_luna, Math.round(STAKE_LUNA * 2 * 0.9))
 })
 

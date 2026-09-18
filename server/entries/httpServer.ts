@@ -40,7 +40,7 @@ export function registerEntryRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await revealEntry(getDb(), wallet, { ...stakeInput, difficulty })
+      const result = await revealEntry(await getDb(), wallet, { ...stakeInput, difficulty })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return
@@ -84,7 +84,7 @@ export function registerEntryRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await createEntry(getDb(), wallet, { ...stakeInput, difficulty, events, visibility, allowRematch })
+      const result = await createEntry(await getDb(), wallet, { ...stakeInput, difficulty, events, visibility, allowRematch })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return

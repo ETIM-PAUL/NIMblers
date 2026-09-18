@@ -3,7 +3,12 @@ services:
     name: nimblers
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build && npm run db:migrate
+    # --include=dev is required here: NODE_ENV=production (set below, for
+    # the running server) also applies during the build step on Render,
+    # and `npm ci` skips devDependencies under NODE_ENV=production by
+    # default — which is exactly where TypeScript, Vite, and the React
+    # type declarations this build actually needs live.
+    buildCommand: npm ci --include=dev && npm run build && npm run db:migrate
     startCommand: npm run server
     healthCheckPath: /api/health
     envVars:

@@ -4,6 +4,7 @@ import type { Router } from '../http/router.ts'
 import { parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from '../entries/houseWallet.ts'
 import { challengeEntry, declineRetry, getEntryForChallenge, listMyDuelHistory, listMyEntries, listOpenEntries, retryStake, retrySubmit, submitChallenge } from './service.ts'
+import { computeBadges } from './badges.ts'
 
 /**
  * Registers Player B's flow: browse open entries, challenge one (stake
@@ -41,7 +42,7 @@ export function registerDuelRoutes(router: Router): void {
       return
     }
     const history = listMyDuelHistory(getDb(), nimAddress)
-    sendJson(res, 200, { history })
+    sendJson(res, 200, { history, badges: computeBadges(history) })
   })
 
   // Resolves a shared duel link — works for a PRIVATE entry too, since

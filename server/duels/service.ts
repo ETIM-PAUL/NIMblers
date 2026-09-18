@@ -148,6 +148,8 @@ export interface DuelHistoryEntry {
   myDurationMs: number
   opponentDurationMs: number
   deltaMs: number
+  /** No Backspace anywhere in this run's own keystroke events — typed clean start to finish. */
+  flawless: boolean
 }
 
 interface HistoryRow {
@@ -160,9 +162,11 @@ interface HistoryRow {
   winner_user_id: string | null
   my_duration_ms: number
   opponent_duration_ms: number
+  my_events: string
 }
 
 function toHistoryEntry(row: HistoryRow): DuelHistoryEntry {
+  const myEvents = JSON.parse(row.my_events) as KeystrokeEvent[]
   return {
     entryId: row.entry_id,
     difficulty: row.difficulty,
@@ -173,6 +177,7 @@ function toHistoryEntry(row: HistoryRow): DuelHistoryEntry {
     myDurationMs: row.my_duration_ms,
     opponentDurationMs: row.opponent_duration_ms,
     deltaMs: Math.abs(row.my_duration_ms - row.opponent_duration_ms),
+    flawless: myEvents.every((event) => event.key !== 'Backspace'),
   }
 }
 
@@ -191,7 +196,7 @@ export function listMyDuelHistory(db: DatabaseSync, nimAddress: string): DuelHis
     .prepare(
       `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
               cu.nim_address as opponent_address, e.creator_user_id as my_user_id, d.winner_user_id,
-              mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms
+              mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms, mine.events as my_events
        FROM entries e
        JOIN duels d ON d.entry_id = e.id
        JOIN paragraphs p ON p.id = e.paragraph_id
@@ -207,7 +212,7 @@ export function listMyDuelHistory(db: DatabaseSync, nimAddress: string): DuelHis
     .prepare(
       `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
               creator_u.nim_address as opponent_address, d.challenger_user_id as my_user_id, d.winner_user_id,
-              mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms
+              mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms, mine.events as my_events
        FROM entries e
        JOIN duels d ON d.entry_id = e.id
        JOIN paragraphs p ON p.id = e.paragraph_id

@@ -105,6 +105,13 @@ button {
   background-repeat: no-repeat;
 }
 
+/* The landing page is viewed in a regular desktop browser, unlike the rest
+   of the app (which only ever runs inside Nimiq Pay's phone-shaped webview)
+   — it shouldn't be capped to phone width. */
+.app-landing {
+  max-width: none;
+}
+
 /* App bar */
 
 .app-bar {
@@ -308,44 +315,6 @@ button {
 .banner-warn {
   background: var(--warn-bg);
   color: var(--warn-text);
-}
-
-/* Fallback screen (opened outside Nimiq Pay) */
-
-.fallback-screen {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px;
-  text-align: center;
-}
-
-.fallback-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.fallback-body {
-  margin: 0;
-  font-size: 14px;
-  color: var(--text-dim);
-}
-
-.fallback-steps {
-  margin: 8px auto 0;
-  padding-left: 20px;
-  text-align: left;
-  font-size: 14px;
-  display: inline-block;
-}
-
-.fallback-error {
-  margin: 8px 0 0;
-  font-size: 13px;
-  color: var(--danger);
 }
 
 /* Identicon */
@@ -650,6 +619,29 @@ button {
 .entry-list-item-column {
   flex-direction: column;
   align-items: stretch;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.badge-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold-bright);
+  background: var(--warn-bg);
+  border: 1px solid var(--gold);
+  vertical-align: middle;
+}
+
+.badge-pill-inline {
+  margin-left: 6px;
 }
 
 .my-entry-status {

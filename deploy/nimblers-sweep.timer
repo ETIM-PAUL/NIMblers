@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the NIMblers expiry sweep every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=nimblers-sweep.service
+
+[Install]
+WantedBy=timers.target

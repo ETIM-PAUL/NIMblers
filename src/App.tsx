@@ -5,8 +5,8 @@ import { ConnectionBanner } from './components/ConnectionBanner'
 import { DuelHistory } from './components/DuelHistory'
 import { DuelPanel } from './components/DuelPanel'
 import { Leaderboard } from './components/Leaderboard'
+import { LandingPage } from './components/LandingPage'
 import { AppLogo, BoardIcon, DuelIcon, HistoryIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
-import { OpenInNimiqPay } from './components/OpenInNimiqPay'
 import { PracticePanel } from './components/PracticePanel'
 import { DUEL_QUERY_PARAM } from './lib/duelLink'
 import { useNimiq } from './lib/useNimiq'
@@ -58,8 +58,8 @@ function App() {
 
   if (!isReady) {
     return (
-      <div className="app">
-        <OpenInNimiqPay errorMessage={errorMessage} />
+      <div className="app app-landing">
+        <LandingPage errorMessage={errorMessage} />
       </div>
     )
   }

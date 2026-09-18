@@ -1,0 +1,518 @@
+/* Landing page — reuses the shipped app's own color tokens (index.css)
+   for brand continuity. Type system: Space Grotesk for display,
+   Inter for body, JetBrains Mono reserved for typed/measured content
+   only — mirroring how the product itself uses mono just for the
+   typing paragraph. */
+
+.landing {
+  --ember: #c1291f;
+  --ember-bright: #e0392c;
+  max-width: 100%;
+  overflow-x: hidden;
+  color: var(--text);
+  background: var(--bg);
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  .landing {
+    --ember: #e5564a;
+    --ember-bright: #f0685c;
+  }
+}
+
+.landing h1,
+.landing h2 {
+  font-family: 'Space Grotesk', -apple-system, system-ui, sans-serif;
+  margin: 0;
+}
+
+.landing p,
+.landing li {
+  margin: 0;
+}
+
+/* ---------- nav ---------- */
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-nav-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.landing-nav-mark img {
+  border-radius: 7px;
+  display: block;
+}
+
+.landing-nav-tag {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+}
+
+/* ---------- hero ---------- */
+
+.landing-hero {
+  padding: 3rem 1.5rem 2.5rem;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.landing-headline {
+  font-size: clamp(2rem, 6vw, 2.9rem);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+}
+
+.landing-subhead {
+  margin-top: 1rem;
+  font-size: 1.08rem;
+  line-height: 1.55;
+  color: var(--text-dim);
+  max-width: 46ch;
+}
+
+/* ---------- race demo ---------- */
+
+.race-demo {
+  margin-top: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.4rem;
+  box-shadow: var(--shadow-md);
+}
+
+.race-demo-label {
+  font-size: 0.92rem;
+  color: var(--text-dim);
+  margin-bottom: 0.9rem;
+}
+
+.race-demo-target {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.02rem;
+  line-height: 1.7;
+  padding: 0.9rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  word-break: break-word;
+}
+
+.race-char {
+  color: var(--text-faint);
+}
+
+.race-char-correct {
+  color: var(--text);
+}
+
+.race-char-incorrect {
+  color: var(--ember-bright);
+  background: var(--danger-soft);
+  border-radius: 2px;
+}
+
+.race-char-caret {
+  color: var(--text);
+  border-left: 2px solid var(--accent-bright);
+  margin-left: -1px;
+}
+
+.race-demo-input {
+  width: 100%;
+  margin-top: 0.8rem;
+  padding: 0.75rem 0.9rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.98rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+}
+
+.race-demo-input:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 1px;
+}
+
+.race-demo-input:disabled {
+  opacity: 0.6;
+}
+
+.race-track {
+  margin-top: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.race-lane {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.race-lane-label {
+  flex: 0 0 6.5rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.race-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--neutral-bg);
+  overflow: hidden;
+}
+
+.race-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 80ms linear;
+}
+
+.race-bar-you {
+  background: var(--duel-grad);
+}
+
+.race-bar-ghost {
+  background: var(--gold);
+}
+
+.race-demo-footer {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.race-demo-hint,
+.race-demo-result {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+
+.race-demo-result-win {
+  color: var(--ok-text);
+  font-weight: 600;
+}
+
+.race-demo-result-lose {
+  color: var(--ember-bright);
+  font-weight: 600;
+}
+
+.race-demo-retry {
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: none;
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+}
+
+.race-demo-retry:hover {
+  background: var(--accent-glow);
+}
+
+.race-demo-retry:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+
+/* ---------- proof strip ---------- */
+
+.landing-proof {
+  padding: 0 1.5rem 3rem;
+}
+
+.landing-proof-strip {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: grid;
+  /* Each panel a little wider than the last — a staircase, not a uniform grid. */
+  grid-template-columns: 0.7fr 0.85fr 1fr 1.15fr 1.3fr;
+  gap: 1.1rem;
+  align-items: end;
+}
+
+.landing-proof-item {
+  margin: 0;
+}
+
+.landing-proof-item img {
+  width: 100%;
+  display: block;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.landing-proof-item figcaption {
+  margin-top: 0.55rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+/* ---------- generic sections ---------- */
+
+.landing-section {
+  padding: 3rem 1.5rem;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.landing-section-dark {
+  max-width: 100%;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-section-dark > * {
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.landing-section-title {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.landing-section-body {
+  margin-top: 0.7rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+  max-width: 52ch;
+}
+
+/* ---------- feature list ---------- */
+
+.landing-features {
+  max-width: 900px;
+}
+
+.landing-feature-list {
+  list-style: none;
+  margin: 1.6rem 0 0;
+  padding: 0;
+  display: grid;
+  /* Same growing-column idea as the screenshots above — each column a
+     little wider than the last, so the row reads as building up rather
+     than four interchangeable boxes. */
+  grid-template-columns: 0.85fr 1fr 1.15fr 1.35fr;
+  gap: 0 1.75rem;
+}
+
+.landing-feature {
+  padding: 1.1rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.landing-feature-title {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.landing-feature-body {
+  margin-top: 0.35rem;
+  color: var(--text-dim);
+  line-height: 1.55;
+  font-size: 0.94rem;
+}
+
+/* ---------- steps ---------- */
+
+.landing-steps {
+  list-style: none;
+  padding: 0;
+  margin: 1.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.landing-step {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.landing-step-number {
+  flex: 0 0 auto;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  width: 1.8rem;
+  height: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-step-title {
+  font-weight: 600;
+  font-size: 1.02rem;
+}
+
+.landing-step-body {
+  margin-top: 0.3rem;
+  color: var(--text-dim);
+  line-height: 1.55;
+  max-width: 50ch;
+}
+
+/* ---------- fairness ---------- */
+
+.landing-fairness {
+  list-style: none;
+  padding: 0;
+  margin: 1.4rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.landing-fairness li {
+  padding-left: 1.1rem;
+  border-left: 2px solid var(--accent);
+  color: var(--text-dim);
+  line-height: 1.55;
+  max-width: 54ch;
+}
+
+/* ---------- leaderboard teaser ---------- */
+
+.landing-leaderboard {
+  max-width: 900px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  align-items: center;
+}
+
+.landing-leaderboard > div {
+  flex: 1 1 280px;
+}
+
+.landing-leaderboard-shot {
+  flex: 1 1 280px;
+  max-width: 320px;
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+/* ---------- CTA ---------- */
+
+.landing-cta {
+  padding: 3rem 1.5rem 2.5rem;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.landing-cta-steps {
+  margin: 1.2rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--text-dim);
+  line-height: 1.8;
+}
+
+.landing-cta-error {
+  margin-top: 1rem;
+  color: var(--ember-bright);
+  font-size: 0.9rem;
+}
+
+.landing-testnet-note {
+  margin-top: 1.4rem;
+  font-size: 0.85rem;
+  color: var(--text-faint);
+}
+
+/* ---------- footer ---------- */
+
+.landing-footer {
+  padding: 1.6rem 1.5rem 2.2rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-faint);
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .race-bar-fill {
+    transition: none;
+  }
+}
+
+/* ---------- tablet ---------- */
+
+@media (max-width: 860px) {
+  .landing-proof-strip {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    align-items: stretch;
+  }
+
+  .landing-feature-list {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.4rem 1.5rem;
+  }
+}
+
+/* ---------- mobile ---------- */
+
+@media (max-width: 480px) {
+  .landing-nav {
+    padding: 0.9rem 1.1rem;
+  }
+
+  .landing-hero,
+  .landing-proof,
+  .landing-section,
+  .landing-cta {
+    padding-left: 1.1rem;
+    padding-right: 1.1rem;
+  }
+
+  .race-lane-label {
+    flex-basis: 5.2rem;
+    font-size: 0.76rem;
+  }
+
+  .landing-leaderboard {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .landing-feature-list {
+    grid-template-columns: 1fr;
+  }
+}

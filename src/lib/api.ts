@@ -76,13 +76,25 @@ export interface DuelHistoryEntry {
   myDurationMs: number
   opponentDurationMs: number
   deltaMs: number
+  flawless: boolean
 }
 
-/** Every duel this address has actually finished, as creator or challenger, newest-decided first. */
-export async function fetchDuelHistory(nimAddress: string): Promise<DuelHistoryEntry[]> {
+export interface EarnedBadge {
+  id: 'flawless' | 'speed-demon' | 'win-streak-5'
+  label: string
+  description: string
+}
+
+export interface DuelHistoryResult {
+  history: DuelHistoryEntry[]
+  badges: EarnedBadge[]
+}
+
+/** Every duel this address has actually finished, as creator or challenger, newest-decided first — plus any achievement badges earned across that history. */
+export async function fetchDuelHistory(nimAddress: string): Promise<DuelHistoryResult> {
   const res = await fetch(`/api/duels/history?nimAddress=${encodeURIComponent(nimAddress)}`)
   const body = await readJsonOrThrow(res, 'Could not load your duel history')
-  return body.history as DuelHistoryEntry[]
+  return { history: body.history as DuelHistoryEntry[], badges: body.badges as EarnedBadge[] }
 }
 
 export function formatSeconds(ms: number): string {

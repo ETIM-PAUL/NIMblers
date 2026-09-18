@@ -1,0 +1,8 @@
+[Unit]
+Description=NIMblers expired-entry refund sweep (one-shot, triggered by nimblers-sweep.timer)
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/NIMblers
+ExecStart=/usr/bin/npm run expiry:sweep

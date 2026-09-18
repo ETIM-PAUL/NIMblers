@@ -68,6 +68,7 @@ leak the answer.
 
 - Real NIM stakes, three difficulty tiers, server-refereed timing — never the client's word for it
 - A fresh paragraph generated per duel, not picked from a fixed pool — nothing to memorize in advance, not even by the person who created it
+- Every paragraph mixes Nimiq-themed vocabulary in with everyday words, picked at random each time — no two duels read alike
 - Public open-duels dashboard, or a private link for a specific opponent
 - Optional double trial: lose the first attempt, restake double for one final try
 - Full duel history (wins, losses, both times, the delta) and a weekly leaderboard ranked by NIM actually won
@@ -87,7 +88,10 @@ all without leaving the app you already have open.
 1. **Pick a level, then stake.** Easy is 1 NIM, Medium is 3, Hard is 5 — each
   tier gets a paragraph generated fresh from word banks at reveal time
    (`server/paragraphs/generator.ts`), tuned harder by longer words and more
-   punctuation, not just a bigger number. Nobody — not even the creator —
+   punctuation, not just a bigger number. Each word is picked at random from
+   a mix of everyday vocabulary and Nimiq-themed terms (`wallet`, `escrow`,
+   `consensus`, and the like), so the theme comes through without the text
+   ever repeating. Nobody — not even the creator —
    can know the text before staking: it doesn't exist yet. The paragraph is
    revealed only after the stake is independently confirmed on-chain, for
    that exact tier's amount — never because a client claims it happened.

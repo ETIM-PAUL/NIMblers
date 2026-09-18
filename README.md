@@ -400,3 +400,9 @@ required, for the same reason as above.
 
 No mainnet key ever touches this repo. Staking, escrow, and payouts run
 exclusively against Nimiq testnet until the app is ready to ship for real.
+
+
+
+## License
+
+MIT — see [LICENSE](LICENSE).

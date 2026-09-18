@@ -69,7 +69,7 @@ function App() {
       <header className="app-bar">
         <div className="app-bar-brand">
           <AppLogo />
-          <h1 className="app-bar-title">NIMble</h1>
+          <h1 className="app-bar-title">NIMblers</h1>
         </div>
         <AddressCard
           address={address}

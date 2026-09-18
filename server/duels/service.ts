@@ -79,8 +79,17 @@ export interface MyEntrySummary {
  * creator's own view of "what have I got open," independent of whatever
  * local UI state a single browser tab happens to be holding (which is
  * lost on reload, or when opened from a different device).
+ *
+ * An OPEN entry past its `expires_at` is reported as EXPIRED here even
+ * before the scheduled sweep (server/duels/expiryJob.ts) actually gets
+ * around to flipping the DB row and issuing the refund — that job only
+ * runs on whatever schedule it's deployed with, so without this, a
+ * creator would keep seeing "waiting for a challenger" (and a dead copy
+ * link) for however long the sweep happens to be behind. The refund
+ * itself still only happens when the sweep runs; this only corrects what
+ * gets *displayed* in the meantime.
  */
-export function listMyEntries(db: DatabaseSync, nimAddress: string): MyEntrySummary[] {
+export function listMyEntries(db: DatabaseSync, nimAddress: string, now: Date = new Date()): MyEntrySummary[] {
   const rows = db
     .prepare(
       `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, p.difficulty, e.status, e.visibility,
@@ -107,21 +116,25 @@ export function listMyEntries(db: DatabaseSync, nimAddress: string): MyEntrySumm
       settled_at: string | null
     }[]
 
-  return rows.map((row) => ({
-    entryId: row.entry_id,
-    stakeLuna: row.stake_luna,
-    difficulty: row.difficulty,
-    status: row.status,
-    visibility: row.visibility,
-    createdAt: row.created_at,
-    expiresAt: row.expires_at,
-    challengerAddress: row.challenger_address,
-    outcome: row.settled_at === null
-      ? null
-      : row.winner_user_id === null
-        ? 'tie'
-        : row.winner_user_id === row.creator_user_id ? 'creator' : 'challenger',
-  }))
+  const nowMs = now.getTime()
+  return rows.map((row) => {
+    const effectivelyExpired = row.status === 'OPEN' && new Date(row.expires_at).getTime() <= nowMs
+    return {
+      entryId: row.entry_id,
+      stakeLuna: row.stake_luna,
+      difficulty: row.difficulty,
+      status: effectivelyExpired ? 'EXPIRED' : row.status,
+      visibility: row.visibility,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      challengerAddress: row.challenger_address,
+      outcome: row.settled_at === null
+        ? null
+        : row.winner_user_id === null
+          ? 'tie'
+          : row.winner_user_id === row.creator_user_id ? 'creator' : 'challenger',
+    }
+  })
 }
 
 export interface DuelHistoryEntry {

@@ -55,15 +55,9 @@ export function HistoryIcon() {
   )
 }
 
-/** The app-bar's logo mark — a filled version of DuelIcon's bolt, in a gradient badge. */
+/** The app-bar's logo mark — the real app icon (already carries its own gradient badge, so no wrapper styling needed beyond sizing/rounding). */
 export function AppLogo() {
-  return (
-    <span className="app-logo">
-      <svg viewBox="0 0 24 24" fill="currentColor">
-        <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" />
-      </svg>
-    </span>
-  )
+  return <img className="app-logo" src="/nimblers-icon.png" alt="" width={30} height={30} />
 }
 
 /** One leaf — the easy tier: calm, low-stakes. */

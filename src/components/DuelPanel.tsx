@@ -278,7 +278,10 @@ export function DuelPanel({ address, sendPayment }: Props) {
     return (
       <div className="duel-panel">
         <p className="section-note-best">Waiting for a challenger.</p>
-        <p className="section-note">Refunded in 24h if unclaimed.{stage.allowRematch && ' Double trial is on.'}</p>
+        <p className="section-note">
+          Refunded in 24h if unclaimed.{stage.allowRematch && ' Double trial is on.'} It's listed publicly now
+          — check My duels to see it (it won't show in your own Open duels).
+        </p>
         <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
           Create another duel
         </button>

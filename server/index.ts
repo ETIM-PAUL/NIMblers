@@ -13,5 +13,5 @@ registerDuelRoutes(router)
 registerLeaderboardRoutes(router)
 
 router.server.listen(port, () => {
-  console.log(`NIMble API listening on :${port}`)
+  console.log(`NIMblers API listening on :${port}`)
 })

@@ -1,18 +1,69 @@
 <div align="center">
 
-# ⌨️ NIMble
+# ⌨️ NIMblers
 
 **Stake NIM. Type fast. Winner takes the pot.**
 
 An async 1v1 speed-typing wager, built as a Nimiq Pay Mini App.
 
+![Nimiq Pay Mini App](https://img.shields.io/badge/Nimiq%20Pay-Mini%20App-0a8a3f)
+![TypeScript](https://img.shields.io/badge/TypeScript-React%20%2B%20Node-3178c6)
+![Network](https://img.shields.io/badge/Network-Testnet%20only-c1291f)
+
 </div>
 
 ---
 
+## Screenshots
+
+<table>
+<tr>
+<td width="33%"><img src="docs/screenshots/open-duels.jpg" alt="Open duels dashboard"></td>
+<td width="33%"><img src="docs/screenshots/typing.jpg" alt="Mid-duel typing screen with live WPM/accuracy"></td>
+<td width="33%"><img src="docs/screenshots/duel-result.jpg" alt="Duel result screen showing both times and the delta"></td>
+</tr>
+<tr>
+<td align="center"><sub>Browse and challenge open stakes</sub></td>
+<td align="center"><sub>A freshly generated paragraph, timed server-side</sub></td>
+<td align="center"><sub>Both times revealed only once the duel is decided</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="docs/screenshots/history.jpg" alt="Duel history with wins, losses, and times"></td>
+<td width="33%"><img src="docs/screenshots/leaderboard.jpg" alt="Weekly leaderboard ranked by NIM won"></td>
+<td width="33%"><img src="docs/screenshots/confirm-payment.jpg" alt="Nimiq Pay's native stake confirmation dialog"></td>
+</tr>
+<tr>
+<td align="center"><sub>Every settled duel, either side of it</sub></td>
+<td align="center"><sub>Ranked by NIM actually won, resets weekly</sub></td>
+<td align="center"><sub>The stake itself always goes through Nimiq Pay's own dialog</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>A settlement's payout, independently verified on-chain</summary>
+<br>
+<img src="docs/screenshots/explorer-tx.jpg" alt="Testnet block explorer showing the real payout transaction" width="360">
+<br><br>
+
+The transaction hash on the result screen links straight to
+[test.nimiq.watch](https://test.nimiq.watch) — every payout is checkable
+against the chain itself, not just displayed by the app that sent it.
+</details>
+
+## Contents
+
+- [What it is](#what-it-is)
+- [Why Nimiq](#why-nimiq)
+- [How a duel works](#how-a-duel-works)
+- [What makes it hard to cheat](#what-makes-it-hard-to-cheat)
+- [Under the hood](#under-the-hood)
+- [Try it](#try-it)
+- [Project layout](#project-layout)
+- [House wallet setup (testnet)](#house-wallet-setup-testnet)
+
 ## What it is
 
-NIMble is a head-to-head typing game with real stakes. You stake NIM, type
+NIMblers is a head-to-head typing game with real stakes. You stake NIM, type
 a paragraph as fast and accurately as you can, and get matched against someone
 else's hidden time. Whoever's faster — measured by the server, not the client —
 wins the pot.
@@ -27,6 +78,15 @@ Hard — for warming up before you put NIM on the line, with your personal best
 per tier tracked locally so there's something to chase even solo. Practicing
 never types today's live duel paragraph for any tier, so warming up can't
 leak the answer.
+
+**At a glance:**
+
+- Real NIM stakes, three difficulty tiers, server-refereed timing — never the client's word for it
+- A fresh paragraph generated per duel, not picked from a fixed pool — nothing to memorize in advance, not even by the person who created it
+- Public open-duels dashboard, or a private link for a specific opponent
+- Optional double trial: lose the first attempt, restake double for one final try
+- Full duel history (wins, losses, both times, the delta) and a weekly leaderboard ranked by NIM actually won
+- Free practice mode with a locally tracked personal best per tier
 
 ## Why Nimiq
 

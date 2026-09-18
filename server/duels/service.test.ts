@@ -203,6 +203,29 @@ test('listMyEntries reports the outcome from the creator\'s perspective once set
   assert.equal(mine[0].outcome, 'creator')
 })
 
+test('listMyEntries reports an OPEN entry past its expiry as EXPIRED, even before the sweep job has run', () => {
+  // The sweep (server/duels/expiryJob.ts) is what actually flips the DB
+  // row and issues the refund, on whatever schedule it's deployed with —
+  // this only fixes what gets displayed if that hasn't happened yet.
+  const oneDayAgo = new Date(Date.now() - 25 * 60 * 60_000).toISOString()
+  db.prepare('UPDATE entries SET expires_at = ? WHERE id = ?').run(oneDayAgo, entryId)
+
+  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  assert.equal(mine[0].status, 'EXPIRED')
+
+  const row = db.prepare('SELECT status FROM entries WHERE id = ?').get(entryId) as { status: string }
+  assert.equal(row.status, 'OPEN', 'the underlying row is untouched — only the sweep job actually settles the refund')
+})
+
+test('listMyEntries does not report a LOCKED or SETTLED entry as EXPIRED just because its expiry has passed', async () => {
+  const wallet = fakeSettlingWallet()
+  await challengeEntry(db, wallet, { entryId, nimAddress: CHALLENGER_ADDRESS, stakeTxHash: 'challenger-tx' })
+  db.prepare("UPDATE entries SET expires_at = ? WHERE id = ?").run(new Date(Date.now() - 25 * 60 * 60_000).toISOString(), entryId)
+
+  const mine = listMyEntries(db, CREATOR_ADDRESS)
+  assert.equal(mine[0].status, 'LOCKED', 'a duel already being played is not "expired" just because the original OPEN window passed')
+})
+
 test('a PRIVATE entry can still be challenged and settled through the normal flow', async () => {
   db.prepare("UPDATE entries SET visibility = 'PRIVATE' WHERE id = ?").run(entryId)
   const wallet = fakeSettlingWallet()

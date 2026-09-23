@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { DuelHistoryEntry, DuelHistoryResult, EarnedBadge } from '../lib/api'
 import { errorMessage, fetchDuelHistory, formatAddressShort, formatAge, formatLuna, formatSeconds } from '../lib/api'
 import { DifficultyChip } from './DifficultyChip'
@@ -33,24 +33,47 @@ export function DuelHistory({ address }: Props) {
   const [result, setResult] = useState<DuelHistoryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    fetchDuelHistory(address)
-      .then((res) => { if (!cancelled) setResult(res) })
-      .catch((err: unknown) => { if (!cancelled) setError(errorMessage(err)) })
-    return () => {
-      cancelled = true
+  const loadHistory = useCallback(async () => {
+    try {
+      setResult(await fetchDuelHistory(address))
+      setError(null)
+    }
+    catch (err) {
+      setError(errorMessage(err))
     }
   }, [address])
 
-  if (error) return <p className="address-card-error">{error}</p>
+  useEffect(() => {
+    void loadHistory()
+  }, [loadHistory])
+
+  const refreshButton = (
+    <button type="button" className="btn btn-secondary refresh-btn" onClick={() => void loadHistory()}>
+      Refresh
+    </button>
+  )
+
+  if (error) {
+    return (
+      <>
+        {refreshButton}
+        <p className="address-card-error">{error}</p>
+      </>
+    )
+  }
   if (result === null) return <p className="section-note">Loading your history…</p>
   if (result.history.length === 0) {
-    return <EmptyState icon={<HistoryIcon />} title="No finished duels yet" subtitle="Wins, losses, and ties will show up here once a duel settles." />
+    return (
+      <>
+        {refreshButton}
+        <EmptyState icon={<HistoryIcon />} title="No finished duels yet" subtitle="Wins, losses, and ties will show up here once a duel settles." />
+      </>
+    )
   }
 
   return (
     <>
+      {refreshButton}
       <BadgeRow badges={result.badges} />
       <ul className="entry-list">
         {result.history.map((entry) => (

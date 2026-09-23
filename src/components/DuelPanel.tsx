@@ -100,7 +100,13 @@ export function DuelPanel({ address, sendPayment }: Props) {
   async function handleStake(difficulty: Difficulty) {
     setStage({ name: 'staking', difficulty })
     try {
-      const house = await fetchHouseAddress()
+      // Use the address already fetched on mount rather than awaiting a
+      // fresh network call here — an `await` sitting between this tap and
+      // sendPayment() (which needs to pop a native confirmation sheet) can
+      // cost the click its "this came from a real tap" standing in some
+      // WebViews, leaving the sheet stuck never appearing. Only falls back
+      // to a fresh fetch if the mount-time one hasn't resolved yet.
+      const house = houseInfo ?? await fetchHouseAddress()
       const stakeTxHash = await sendPayment(house.address, house.stakes[difficulty])
       await revealParagraph(difficulty, stakeTxHash)
     }

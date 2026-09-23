@@ -79,7 +79,15 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   const [pastedLink, setPastedLink] = useState('')
   const [pastedLinkError, setPastedLinkError] = useState<string | null>(null)
   const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null)
+  const [houseAddress, setHouseAddress] = useState<string | null>(null)
   const copyFallbackRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    fetchHouseAddress().then((info) => setHouseAddress(info.address)).catch(() => {
+      // handleChallenge/handleRetry fetch this again if it's still missing
+      // when the user actually taps — this is just a warm cache.
+    })
+  }, [])
 
   const loadEntries = useCallback(async () => {
     try {
@@ -176,8 +184,13 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   async function handleChallenge(entryId: string, stakeLuna: number, creatorAddress: string) {
     setStage({ name: 'staking', entryId, creatorAddress })
     try {
-      const house = await fetchHouseAddress()
-      const stakeTxHash = await sendPayment(house.address, stakeLuna)
+      // Use the address already fetched on mount rather than awaiting a
+      // fresh network call here — an `await` sitting between this tap and
+      // sendPayment() (which needs to pop a native confirmation sheet) can
+      // cost the click its "this came from a real tap" standing in some
+      // WebViews, leaving the sheet stuck never appearing.
+      const recipient = houseAddress ?? (await fetchHouseAddress()).address
+      const stakeTxHash = await sendPayment(recipient, stakeLuna)
       await challenge(entryId, creatorAddress, stakeTxHash)
     }
     catch (error) {
@@ -220,8 +233,8 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
   async function handleRetry(entryId: string, creatorAddress: string, paragraph: string, retryStakeLuna: number) {
     setStage({ name: 'retry-staking', entryId, creatorAddress, paragraph })
     try {
-      const house = await fetchHouseAddress()
-      const stakeTxHash = await sendPayment(house.address, retryStakeLuna)
+      const recipient = houseAddress ?? (await fetchHouseAddress()).address
+      const stakeTxHash = await sendPayment(recipient, retryStakeLuna)
       const res = await fetch('/api/entries/challenge/retry/stake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -304,6 +317,9 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
 
         {browseTab === 'open' && (
           <>
+            <button type="button" className="btn btn-secondary refresh-btn" onClick={() => void loadEntries()}>
+              Refresh
+            </button>
             {listError && <p className="address-card-error">{listError}</p>}
             {entries === null && !listError && <p className="section-note">Loading open duels…</p>}
             {entries !== null && entries.length === 0 && (
@@ -331,14 +347,14 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                 ))}
               </ul>
             )}
-            <button type="button" className="btn btn-secondary" onClick={() => void loadEntries()}>
-              Refresh
-            </button>
           </>
         )}
 
         {browseTab === 'mine' && (
           <>
+            <button type="button" className="btn btn-secondary refresh-btn" onClick={() => void loadMyEntries()}>
+              Refresh
+            </button>
             {myEntriesError && <p className="address-card-error">{myEntriesError}</p>}
             {myEntries === null && !myEntriesError && <p className="section-note">Loading your duels…</p>}
             {myEntries !== null && myEntries.length === 0 && (
@@ -367,9 +383,6 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                 })}
               </ul>
             )}
-            <button type="button" className="btn btn-secondary" onClick={() => void loadMyEntries()}>
-              Refresh
-            </button>
           </>
         )}
       </div>

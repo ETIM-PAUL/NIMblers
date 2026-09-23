@@ -5,6 +5,9 @@ import '../landing.css'
 
 interface Props {
   errorMessage: string | null
+  /** Whether the Nimiq Pay provider is actually connected — "Launch App" only makes sense once there's an app to launch into. */
+  isReady: boolean
+  onLaunch: () => void
 }
 
 /** A steady, believable pace for the "someone else" racing bar — not superhuman, just a real typist. */
@@ -129,7 +132,7 @@ const SCREENSHOTS = [
 ]
 
 const STEPS = [
-  { title: 'Stake NIM', body: 'Pick Easy, Medium, or Hard. The tier sets the stake and how long and punctuated the paragraph gets.' },
+  { title: 'Stake NIM', body: 'Pick Easy, Medium, or Hard, and a language — English, French, or Spanish. The tier sets the stake and how long and punctuated the paragraph gets.' },
   { title: 'Type blind', body: "You race a paragraph nobody's seen before — generated the moment you stake. Your time stays hidden, even from you, until the duel ends." },
   { title: 'Someone takes the bet', body: "Another player finds your stake on the open list — or, if you made it private, only whoever has the link can take it. They race the same paragraph you did." },
   { title: 'The server decides', body: 'Whoever typed it faster — timed server-side, not by either phone — takes the pot. A tie refunds both stakes in full.' },
@@ -137,6 +140,7 @@ const STEPS = [
 
 const FEATURES = [
   { title: 'Public or private duels', body: 'Stake into the open list for anyone to challenge, or keep it private and hand the link to one person yourself.' },
+  { title: 'Type in English, French, or Spanish', body: "Picked from your device's own language by default — switch it before you stake, any duel, any time." },
   { title: 'Practice mode, no stake', body: 'Warm up on the same paragraph generator with nothing on the line, whenever you want.' },
   { title: 'Full duel history', body: 'Every duel you have ever played, win or lose, with both times and the settlement date.' },
   { title: 'Weekly leaderboard', body: 'Ranked by NIM actually won. Starts fresh every Monday, so last week never sits at the top forever.' },
@@ -149,7 +153,7 @@ const FAIRNESS_POINTS = [
   "Bot-typed runs get caught. Real typing has a rhythm — steady timers and flat randomness don't fake it.",
 ]
 
-export function LandingPage({ errorMessage }: Props) {
+export function LandingPage({ errorMessage, isReady, onLaunch }: Props) {
   return (
     <div className="landing">
       <header className="landing-nav">
@@ -157,7 +161,14 @@ export function LandingPage({ errorMessage }: Props) {
           <img src="/nimblers-icon.png" alt="" width={26} height={26} />
           NIMblers
         </span>
-        <span className="landing-nav-tag">Nimiq testnet</span>
+        <span className="landing-nav-right">
+          <span className="landing-nav-tag">Nimiq testnet</span>
+          {isReady && (
+            <button type="button" className="landing-launch-btn" onClick={onLaunch}>
+              Launch App
+            </button>
+          )}
+        </span>
       </header>
 
       <section className="landing-hero">
@@ -230,17 +241,33 @@ export function LandingPage({ errorMessage }: Props) {
       </section>
 
       <section className="landing-cta">
-        <h2 className="landing-section-title">Open it in Nimiq Pay</h2>
-        <p className="landing-section-body">
-          NIMblers only runs inside Nimiq Pay — that's what lets a duel settle
-          on-chain without you ever leaving the app you already have open.
-        </p>
-        <ol className="landing-cta-steps">
-          <li>Open the Nimiq Pay app on your phone</li>
-          <li>Go to <strong>Mini Apps</strong></li>
-          <li>Paste in this page's link</li>
-        </ol>
-        {errorMessage && <p className="landing-cta-error">Connection error: {errorMessage}</p>}
+        {isReady
+          ? (
+              <>
+                <h2 className="landing-section-title">You're all set</h2>
+                <p className="landing-section-body">
+                  Nimiq Pay is connected. Jump in whenever you're ready.
+                </p>
+                <button type="button" className="btn btn-primary landing-launch-btn-cta" onClick={onLaunch}>
+                  Launch App
+                </button>
+              </>
+            )
+          : (
+              <>
+                <h2 className="landing-section-title">Open it in Nimiq Pay</h2>
+                <p className="landing-section-body">
+                  NIMblers only runs inside Nimiq Pay — that's what lets a duel settle
+                  on-chain without you ever leaving the app you already have open.
+                </p>
+                <ol className="landing-cta-steps">
+                  <li>Open the Nimiq Pay app on your phone</li>
+                  <li>Go to <strong>Mini Apps</strong></li>
+                  <li>Paste in this page's link</li>
+                </ol>
+                {errorMessage && <p className="landing-cta-error">Connection error: {errorMessage}</p>}
+              </>
+            )}
         <p className="landing-testnet-note">
           Running on Nimiq testnet — every stake here is test NIM, not real funds.
         </p>

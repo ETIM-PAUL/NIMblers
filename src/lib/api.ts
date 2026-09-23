@@ -38,8 +38,35 @@ export function buildDuelDeepLink(entryId: string): string {
   return miniAppUrl.toString()
 }
 
+/**
+ * Extracts a human-readable message from anything a `catch` block might see.
+ * Not every rejection here is a real `Error` — the Nimiq Pay provider bridge
+ * (`@nimiq/mini-app-sdk`) can reject a request with a plain object instead
+ * (e.g. a transport-level timeout when there's no real Nimiq Pay parent to
+ * answer, which is exactly what happens testing this in a plain browser).
+ * Falling back to bare `String(error)` for those turns into the literal
+ * text "[object Object]", which tells the player nothing — so a plain
+ * object is inspected for a `.message` (or nested `.error.message`, the
+ * provider's own `ErrorResponse` shape) first, and only stringified as JSON
+ * as a last resort.
+ */
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null) {
+    const value = error as Record<string, unknown>
+    if (typeof value.message === 'string') return value.message
+    const nested = value.error
+    if (typeof nested === 'object' && nested !== null && typeof (nested as Record<string, unknown>).message === 'string') {
+      return (nested as Record<string, unknown>).message as string
+    }
+    try {
+      return JSON.stringify(error)
+    }
+    catch {
+      // Falls through to String() below — e.g. a circular structure.
+    }
+  }
+  return String(error)
 }
 
 /** Parses a fetch response as JSON, throwing the server's `error` field (or a fallback) if the response wasn't ok. */

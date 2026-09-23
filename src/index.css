@@ -575,6 +575,12 @@ button {
   gap: 8px;
 }
 
+.refresh-btn {
+  display: block;
+  margin: 0 0 0.75rem;
+  width: 100%;
+}
+
 .entry-list-item {
   background: var(--surface);
   border: 1px solid var(--border);

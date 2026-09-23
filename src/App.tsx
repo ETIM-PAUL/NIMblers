@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AddressCard } from './components/AddressCard'
 import { ChallengeBrowser } from './components/ChallengeBrowser'
 import { ConnectionBanner } from './components/ConnectionBanner'
@@ -24,7 +24,6 @@ const TAB_ICONS: Record<Tab, React.ReactNode> = {
 
 function App() {
   const {
-    isConnecting,
     isReady,
     errorMessage,
     hasConsensus,
@@ -40,6 +39,16 @@ function App() {
   // Read once — the param that opened this session doesn't change later.
   const [presetEntryId] = useState(() => new URLSearchParams(window.location.search).get(DUEL_QUERY_PARAM) ?? undefined)
   const [activeTab, setActiveTab] = useState<Tab>(presetEntryId ? 'open' : 'duel')
+
+  // The landing page is always the first thing shown, inside Nimiq Pay or
+  // not — "Launch App" is what moves past it. A shared duel link is the one
+  // exception: it's already a direct, intentional entry point, so skip the
+  // marketing page and go straight in the moment the provider is actually
+  // ready (never before — there's nothing to launch into outside Nimiq Pay).
+  const [hasLaunched, setHasLaunched] = useState(false)
+  useEffect(() => {
+    if (presetEntryId && isReady) setHasLaunched(true)
+  }, [presetEntryId, isReady])
   const tabLabels: Record<Tab, string> = {
     duel: 'Duel',
     open: presetEntryId ? 'Invite' : 'Open',
@@ -48,18 +57,13 @@ function App() {
     leaderboard: 'Board',
   }
 
-  if (isConnecting) {
-    return (
-      <div className="app">
-        <div className="banner banner-neutral">Connecting to Nimiq Pay…</div>
-      </div>
-    )
-  }
-
-  if (!isReady) {
+  // The landing page loads immediately, connected or not — "Launch App"
+  // (and the CTA at the bottom) only appear once isReady flips true, so
+  // there's no blocking "Connecting…" screen in front of it.
+  if (!hasLaunched) {
     return (
       <div className="app app-landing">
-        <LandingPage errorMessage={errorMessage} />
+        <LandingPage errorMessage={errorMessage} isReady={isReady} onLaunch={() => setHasLaunched(true)} />
       </div>
     )
   }

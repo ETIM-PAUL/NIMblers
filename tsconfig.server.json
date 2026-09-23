@@ -2,7 +2,10 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
+    // DOM is needed only because "src/**/*.test.ts" below pulls in frontend
+    // modules (e.g. src/lib/api.ts's `window.location` use) for
+    // typechecking — this config still never emits browser-targeted code.
+    "lib": ["ES2023", "DOM"],
     "types": ["node"],
     "skipLibCheck": true,
 

@@ -80,12 +80,25 @@ export function useNimiq(): NimiqConnection {
     }
   }, [])
 
+  // Generous — this is real user think time (reviewing and tapping to
+  // confirm a real payment), not a network round trip — but still bounded,
+  // so a request that never gets a response (the provider bridge silently
+  // dropping it, no confirmation sheet ever appearing) eventually surfaces
+  // as a clear error instead of leaving the UI stuck on "Confirm the
+  // payment…" forever with no feedback.
+  const PAYMENT_TIMEOUT_MS = 120_000
+
   const sendPayment = useCallback(async (recipient: string, valueLuna: number): Promise<string> => {
     const client = clientRef.current
     if (!client) throw new Error('Nimiq provider is not ready')
-    const result = await client.sendBasicTransaction({ recipient, value: valueLuna })
+    const result = await Promise.race([
+      client.sendBasicTransaction({ recipient, value: valueLuna }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timed out waiting for the payment to be confirmed in Nimiq Pay')), PAYMENT_TIMEOUT_MS)
+      }),
+    ])
     if (typeof result === 'string') return result
-    throw new Error(result.error.message)
+    throw new Error(result?.error?.message ?? 'Payment failed with no error message from the provider')
   }, [])
 
   return {

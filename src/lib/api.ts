@@ -5,6 +5,24 @@ export type Difficulty = 'easy' | 'medium' | 'hard'
 export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
 
+export type Language = 'en' | 'fr' | 'es'
+
+export const LANGUAGES: Language[] = ['en', 'fr', 'es']
+export const LANGUAGE_LABELS: Record<Language, string> = { en: 'English', fr: 'French', es: 'Spanish' }
+
+/**
+ * Maps the browser/device's own language setting to one of the three this
+ * app supports, so the language picker starts on whatever the player
+ * already reads instead of always defaulting to English. Falls back to
+ * English for anything else (German, Japanese, an unrecognized locale
+ * string, or `navigator.language` being unavailable at all).
+ */
+export function detectDeviceLanguage(): Language {
+  const tag = typeof navigator !== 'undefined' ? navigator.language : undefined
+  const primary = tag?.slice(0, 2).toLowerCase()
+  return primary === 'fr' || primary === 'es' ? primary : 'en'
+}
+
 export type Visibility = 'PUBLIC' | 'PRIVATE'
 
 /**
@@ -51,6 +69,7 @@ export interface MyEntry {
   entryId: string
   stakeLuna: number
   difficulty: Difficulty
+  language: Language
   status: EntryStatus
   visibility: Visibility
   createdAt: string
@@ -69,6 +88,7 @@ export async function fetchMyEntries(nimAddress: string): Promise<MyEntry[]> {
 export interface DuelHistoryEntry {
   entryId: string
   difficulty: Difficulty
+  language: Language
   stakeLuna: number
   settledAt: string
   opponentAddress: string

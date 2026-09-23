@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client.ts'
-import type { Difficulty, DuelRow, EntryRow, EntryStatus, EntryVisibility } from '../db/types.ts'
+import type { Difficulty, DuelRow, EntryRow, EntryStatus, EntryVisibility, Language } from '../db/types.ts'
 import { getOrCreateUser, getUserAddress } from '../db/users.ts'
 import { confirmStake } from '../entries/service.ts'
 import { submitRun } from '../runs/service.ts'
@@ -26,6 +26,7 @@ export interface OpenEntrySummary {
   creatorAddress: string
   stakeLuna: number
   difficulty: Difficulty
+  language: Language
   createdAt: string
 }
 
@@ -39,14 +40,14 @@ export interface OpenEntrySummary {
 export async function listOpenEntries(db: Db, excludeNimAddress?: string): Promise<OpenEntrySummary[]> {
   const nowIso = new Date().toISOString()
   const rows = (await db.execute({
-    sql: `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at
+    sql: `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, p.language, e.created_at
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
        JOIN paragraphs p ON p.id = e.paragraph_id
        WHERE e.status = 'OPEN' AND e.expires_at > ? AND e.visibility = 'PUBLIC'
        ORDER BY e.created_at ASC`,
     args: [nowIso],
-  })).rows as unknown as { entry_id: string, creator_address: string, stake_luna: number, difficulty: Difficulty, created_at: string }[]
+  })).rows as unknown as { entry_id: string, creator_address: string, stake_luna: number, difficulty: Difficulty, language: Language, created_at: string }[]
 
   return rows
     .filter((row) => row.creator_address !== excludeNimAddress)
@@ -55,6 +56,7 @@ export async function listOpenEntries(db: Db, excludeNimAddress?: string): Promi
       creatorAddress: row.creator_address,
       stakeLuna: row.stake_luna,
       difficulty: row.difficulty,
+      language: row.language,
       createdAt: row.created_at,
     }))
 }
@@ -63,6 +65,7 @@ export interface MyEntrySummary {
   entryId: string
   stakeLuna: number
   difficulty: Difficulty
+  language: Language
   status: EntryStatus
   visibility: EntryVisibility
   createdAt: string
@@ -90,7 +93,7 @@ export interface MyEntrySummary {
  */
 export async function listMyEntries(db: Db, nimAddress: string, now: Date = new Date()): Promise<MyEntrySummary[]> {
   const rows = (await db.execute({
-    sql: `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, p.difficulty, e.status, e.visibility,
+    sql: `SELECT e.id as entry_id, e.creator_user_id, e.stake_luna, p.difficulty, p.language, e.status, e.visibility,
               e.created_at, e.expires_at, cu.nim_address as challenger_address, d.winner_user_id, d.settled_at
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
@@ -105,6 +108,7 @@ export async function listMyEntries(db: Db, nimAddress: string, now: Date = new 
       creator_user_id: string
       stake_luna: number
       difficulty: Difficulty
+      language: Language
       status: EntryStatus
       visibility: EntryVisibility
       created_at: string
@@ -121,6 +125,7 @@ export async function listMyEntries(db: Db, nimAddress: string, now: Date = new 
       entryId: row.entry_id,
       stakeLuna: row.stake_luna,
       difficulty: row.difficulty,
+      language: row.language,
       status: effectivelyExpired ? 'EXPIRED' : row.status,
       visibility: row.visibility,
       createdAt: row.created_at,
@@ -138,6 +143,7 @@ export async function listMyEntries(db: Db, nimAddress: string, now: Date = new 
 export interface DuelHistoryEntry {
   entryId: string
   difficulty: Difficulty
+  language: Language
   stakeLuna: number
   /** When the duel was decided — not when it was created/challenged. */
   settledAt: string
@@ -153,6 +159,7 @@ export interface DuelHistoryEntry {
 interface HistoryRow {
   entry_id: string
   difficulty: Difficulty
+  language: Language
   stake_luna: number
   settled_at: string
   opponent_address: string
@@ -168,6 +175,7 @@ function toHistoryEntry(row: HistoryRow): DuelHistoryEntry {
   return {
     entryId: row.entry_id,
     difficulty: row.difficulty,
+    language: row.language,
     stakeLuna: row.stake_luna,
     settledAt: row.settled_at,
     opponentAddress: row.opponent_address,
@@ -191,7 +199,7 @@ function toHistoryEntry(row: HistoryRow): DuelHistoryEntry {
  */
 export async function listMyDuelHistory(db: Db, nimAddress: string): Promise<DuelHistoryEntry[]> {
   const asCreator = (await db.execute({
-    sql: `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
+    sql: `SELECT e.id as entry_id, p.difficulty, p.language, e.stake_luna, d.settled_at,
               cu.nim_address as opponent_address, e.creator_user_id as my_user_id, d.winner_user_id,
               mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms, mine.events as my_events
        FROM entries e
@@ -206,7 +214,7 @@ export async function listMyDuelHistory(db: Db, nimAddress: string): Promise<Due
   })).rows as unknown as HistoryRow[]
 
   const asChallenger = (await db.execute({
-    sql: `SELECT e.id as entry_id, p.difficulty, e.stake_luna, d.settled_at,
+    sql: `SELECT e.id as entry_id, p.difficulty, p.language, e.stake_luna, d.settled_at,
               creator_u.nim_address as opponent_address, d.challenger_user_id as my_user_id, d.winner_user_id,
               mine.duration_ms as my_duration_ms, opp.duration_ms as opponent_duration_ms, mine.events as my_events
        FROM entries e
@@ -239,7 +247,7 @@ export type EntryLookupResult =
  */
 export async function getEntryForChallenge(db: Db, entryId: string, excludeNimAddress?: string): Promise<EntryLookupResult> {
   const row = (await db.execute({
-    sql: `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, e.created_at, e.status, e.expires_at, e.visibility
+    sql: `SELECT e.id as entry_id, u.nim_address as creator_address, e.stake_luna, p.difficulty, p.language, e.created_at, e.status, e.expires_at, e.visibility
        FROM entries e
        JOIN users u ON u.id = e.creator_user_id
        JOIN paragraphs p ON p.id = e.paragraph_id
@@ -251,6 +259,7 @@ export async function getEntryForChallenge(db: Db, entryId: string, excludeNimAd
         creator_address: string
         stake_luna: number
         difficulty: Difficulty
+        language: Language
         created_at: string
         status: string
         expires_at: string
@@ -270,6 +279,7 @@ export async function getEntryForChallenge(db: Db, entryId: string, excludeNimAd
       creatorAddress: row.creator_address,
       stakeLuna: row.stake_luna,
       difficulty: row.difficulty,
+      language: row.language,
       createdAt: row.created_at,
       visibility: row.visibility,
     },

@@ -2,17 +2,18 @@ import { useState } from 'react'
 import { getPracticeParagraph } from '../../server/paragraphs/service'
 import { PARAGRAPH_POOL } from '../../server/paragraphs/pool-data'
 import { getRunDurationMs } from '../../shared/timingEngine'
-import type { Difficulty } from '../lib/api'
+import type { Difficulty, Language } from '../lib/api'
 import { DIFFICULTIES, DIFFICULTY_LABELS } from '../lib/api'
 import { getBrowserLocalStorage } from '../lib/browserStorage'
+import { LanguagePicker, useDefaultLanguage } from './LanguagePicker'
 import { getPersonalBest, recordResult } from '../lib/personalBest'
 import { EasyIcon, HardIcon, MediumIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
 
 const DIFFICULTY_ICONS: Record<Difficulty, React.ReactNode> = { easy: <EasyIcon />, medium: <MediumIcon />, hard: <HardIcon /> }
 
-function pickParagraph(difficulty: Difficulty): string {
-  return getPracticeParagraph(PARAGRAPH_POOL, new Date(), Math.random, difficulty).body
+function pickParagraph(difficulty: Difficulty, language: Language): string {
+  return getPracticeParagraph(PARAGRAPH_POOL, new Date(), Math.random, difficulty, language).body
 }
 
 function formatMs(ms: number): string {
@@ -29,10 +30,11 @@ export function PracticePanel() {
   const [difficulty, setDifficulty] = useState<Difficulty | null>(null)
   const [paragraph, setParagraph] = useState<string | null>(null)
   const [result, setResult] = useState<Result | null>(null)
+  const [language, setLanguage, languageOverridden] = useDefaultLanguage()
 
   function selectDifficulty(next: Difficulty) {
     setDifficulty(next)
-    setParagraph(pickParagraph(next))
+    setParagraph(pickParagraph(next, language))
     setResult(null)
   }
 
@@ -52,6 +54,7 @@ export function PracticePanel() {
     return (
       <div className="difficulty-picker-wrap">
         <p className="section-note">No stakes here — just you against the clock.</p>
+        <LanguagePicker language={language} onChange={setLanguage} overridden={languageOverridden} />
         <div className="difficulty-picker">
           {DIFFICULTIES.map((d, i) => (
             <button

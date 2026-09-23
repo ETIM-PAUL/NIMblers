@@ -2,6 +2,8 @@ export type EntryStatus = 'OPEN' | 'LOCKED' | 'SETTLED' | 'EXPIRED'
 
 export type Difficulty = 'easy' | 'medium' | 'hard'
 
+export type Language = 'en' | 'fr' | 'es'
+
 /** PUBLIC entries are listed for anyone to browse; PRIVATE ones are reachable only via their shareable link. */
 export type EntryVisibility = 'PUBLIC' | 'PRIVATE'
 
@@ -17,6 +19,7 @@ export interface ParagraphRow {
   id: string
   body: string
   difficulty: Difficulty
+  language: Language
   created_at: string
   /** Set only for a paragraph generated fresh at reveal time — ties it to the stake that revealed it, so a retried reveal finds it again instead of generating a new one. Null for the old fixed pool (still used by practice mode). */
   reveal_stake_tx_hash: string | null

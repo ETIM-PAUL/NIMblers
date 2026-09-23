@@ -1,4 +1,4 @@
-import type { Difficulty, EntryVisibility } from '../db/types.ts'
+import type { Difficulty, EntryVisibility, Language } from '../db/types.ts'
 
 export interface RawEvent {
   key: string
@@ -27,6 +27,11 @@ export function parseStakeBody(body: unknown): { nimAddress: string, stakeTxHash
 
 export function isDifficulty(value: unknown): value is Difficulty {
   return value === 'easy' || value === 'medium' || value === 'hard'
+}
+
+/** Optional — undefined means "not specified" (revealEntry/createEntry default that to 'en'), not invalid. */
+export function isLanguageOrUndefined(value: unknown): value is Language | undefined {
+  return value === undefined || value === 'en' || value === 'fr' || value === 'es'
 }
 
 /** Optional — undefined means "not specified" (createEntry defaults that to PUBLIC), not invalid. */

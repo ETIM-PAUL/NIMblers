@@ -3,6 +3,7 @@ import type { DuelHistoryEntry, DuelHistoryResult, EarnedBadge } from '../lib/ap
 import { errorMessage, fetchDuelHistory, formatAddressShort, formatAge, formatLuna, formatSeconds } from '../lib/api'
 import { DifficultyChip } from './DifficultyChip'
 import { EmptyState } from './EmptyState'
+import { LanguageChip } from './LanguageChip'
 import { HistoryIcon } from './NavIcons'
 
 interface Props {
@@ -56,7 +57,7 @@ export function DuelHistory({ address }: Props) {
           <li key={entry.entryId} className="entry-list-item entry-list-item-column">
             <div className="entry-list-info">
               <span className="entry-list-meta">
-                <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.settledAt)}
+                <DifficultyChip difficulty={entry.difficulty} /> <LanguageChip language={entry.language} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.settledAt)}
                 {entry.flawless && entry.outcome === 'won' && <span className="badge-pill badge-pill-inline" title="Won without a single correction">Flawless</span>}
               </span>
               <span className={`my-entry-status my-entry-status-${entry.outcome === 'won' ? 'won' : entry.outcome === 'lost' ? 'lost' : 'neutral'}`}>

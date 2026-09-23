@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client.ts'
 import { isUniqueConstraintError } from '../db/client.ts'
-import type { Difficulty, ParagraphRow } from '../db/types.ts'
+import type { Difficulty, Language, ParagraphRow } from '../db/types.ts'
 import { generateParagraph } from './generator.ts'
 import type { Paragraph } from './service.ts'
 import { getPracticeParagraph } from './service.ts'
 
 export async function listParagraphs(db: Db): Promise<Paragraph[]> {
-  const rows = (await db.execute('SELECT id, body, difficulty FROM paragraphs ORDER BY id')).rows as unknown as Pick<
+  const rows = (await db.execute('SELECT id, body, difficulty, language FROM paragraphs ORDER BY id')).rows as unknown as Pick<
     ParagraphRow,
-    'id' | 'body' | 'difficulty'
+    'id' | 'body' | 'difficulty' | 'language'
   >[]
-  return rows.map((row) => ({ id: row.id, body: row.body, difficulty: row.difficulty }))
+  return rows.map((row) => ({ id: row.id, body: row.body, difficulty: row.difficulty, language: row.language }))
 }
 
 /**
@@ -26,30 +26,35 @@ export async function listParagraphs(db: Db): Promise<Paragraph[]> {
  * losing insert rather than two different paragraphs — that one just
  * re-reads what the winner wrote.
  */
-export async function getOrGenerateParagraphForStake(db: Db, stakeTxHash: string, difficulty: Difficulty): Promise<Paragraph> {
+export async function getOrGenerateParagraphForStake(
+  db: Db,
+  stakeTxHash: string,
+  difficulty: Difficulty,
+  language: Language = 'en',
+): Promise<Paragraph> {
   const existing = (await db.execute({
-    sql: 'SELECT id, body, difficulty FROM paragraphs WHERE reveal_stake_tx_hash = ?',
+    sql: 'SELECT id, body, difficulty, language FROM paragraphs WHERE reveal_stake_tx_hash = ?',
     args: [stakeTxHash],
-  })).rows[0] as unknown as Pick<ParagraphRow, 'id' | 'body' | 'difficulty'> | undefined
-  if (existing) return { id: existing.id, body: existing.body, difficulty: existing.difficulty }
+  })).rows[0] as unknown as Pick<ParagraphRow, 'id' | 'body' | 'difficulty' | 'language'> | undefined
+  if (existing) return { id: existing.id, body: existing.body, difficulty: existing.difficulty, language: existing.language }
 
   const id = randomUUID()
-  const body = generateParagraph(difficulty)
+  const body = generateParagraph(difficulty, language)
   try {
     await db.execute({
-      sql: 'INSERT INTO paragraphs (id, body, difficulty, created_at, reveal_stake_tx_hash) VALUES (?, ?, ?, ?, ?)',
-      args: [id, body, difficulty, new Date().toISOString(), stakeTxHash],
+      sql: 'INSERT INTO paragraphs (id, body, difficulty, language, created_at, reveal_stake_tx_hash) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [id, body, difficulty, language, new Date().toISOString(), stakeTxHash],
     })
-    return { id, body, difficulty }
+    return { id, body, difficulty, language }
   }
   catch (error) {
     if (!isUniqueConstraintError(error)) throw error
     const row = (await db.execute({
-      sql: 'SELECT id, body, difficulty FROM paragraphs WHERE reveal_stake_tx_hash = ?',
+      sql: 'SELECT id, body, difficulty, language FROM paragraphs WHERE reveal_stake_tx_hash = ?',
       args: [stakeTxHash],
-    })).rows[0] as unknown as Pick<ParagraphRow, 'id' | 'body' | 'difficulty'> | undefined
+    })).rows[0] as unknown as Pick<ParagraphRow, 'id' | 'body' | 'difficulty' | 'language'> | undefined
     if (!row) throw error
-    return { id: row.id, body: row.body, difficulty: row.difficulty }
+    return { id: row.id, body: row.body, difficulty: row.difficulty, language: row.language }
   }
 }
 
@@ -57,6 +62,7 @@ export async function getPracticeParagraphForToday(
   db: Db,
   date: Date = new Date(),
   difficulty?: Difficulty,
+  language: Language = 'en',
 ): Promise<Paragraph> {
-  return getPracticeParagraph(await listParagraphs(db), date, Math.random, difficulty)
+  return getPracticeParagraph(await listParagraphs(db), date, Math.random, difficulty, language)
 }

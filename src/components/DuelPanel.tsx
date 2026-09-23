@@ -3,6 +3,7 @@ import type { KeystrokeRun } from '../../shared/timingEngine'
 import type { Difficulty, HouseAddressInfo, MyEntry, Visibility } from '../lib/api'
 import { buildDuelDeepLink, DIFFICULTIES, DIFFICULTY_LABELS, errorMessage, fetchHouseAddress, fetchMyEntries, formatLuna, readJsonOrThrow } from '../lib/api'
 import { copyText } from '../lib/clipboard'
+import { LanguagePicker, useDefaultLanguage } from './LanguagePicker'
 import { BoardIcon, EasyIcon, HardIcon, MediumIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
 
@@ -29,6 +30,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
   const [stage, setStage] = useState<Stage>({ name: 'picking' })
   const [visibility, setVisibility] = useState<Visibility>('PUBLIC')
   const [allowRematch, setAllowRematch] = useState(false)
+  const [language, setLanguage, languageOverridden] = useDefaultLanguage()
   const [houseInfo, setHouseInfo] = useState<HouseAddressInfo | null>(null)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [resolvedEntry, setResolvedEntry] = useState<MyEntry | null>(null)
@@ -85,7 +87,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
       const res = await fetch('/api/entries/reveal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty }),
+        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, language }),
       })
       const body = await readJsonOrThrow(res, 'Could not reveal the paragraph')
       setStage({ name: 'typing', difficulty, stakeTxHash, paragraph: body.paragraphBody as string })
@@ -113,7 +115,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
       const res = await fetch('/api/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events, visibility, allowRematch }),
+        body: JSON.stringify({ nimAddress: address, stakeTxHash, difficulty, events: run.events, visibility, allowRematch, language }),
       })
       const body = await readJsonOrThrow(res, 'Could not submit your run')
       setCopyStatus('idle')
@@ -166,6 +168,7 @@ export function DuelPanel({ address, sendPayment }: Props) {
           <input type="checkbox" checked={allowRematch} onChange={(e) => setAllowRematch(e.target.checked)} />
           Allow double trial (loser can retry for 2x)
         </label>
+        <LanguagePicker language={language} onChange={setLanguage} overridden={languageOverridden} />
         <div className="difficulty-picker">
           {DIFFICULTIES.map((d) => (
             <button

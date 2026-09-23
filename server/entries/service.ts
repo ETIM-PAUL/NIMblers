@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client.ts'
 import { isUniqueConstraintError } from '../db/client.ts'
-import type { Difficulty, EntryStatus, EntryVisibility } from '../db/types.ts'
+import type { Difficulty, EntryStatus, EntryVisibility, Language } from '../db/types.ts'
 import { getOrCreateUser } from '../db/users.ts'
 import { getOrGenerateParagraphForStake } from '../paragraphs/repository.ts'
 import { submitRun } from '../runs/service.ts'
@@ -59,7 +59,7 @@ export type RevealResult =
 export async function revealEntry(
   db: Db,
   wallet: HouseWallet,
-  input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty },
+  input: { nimAddress: string, stakeTxHash: string, difficulty: Difficulty, language?: Language },
 ): Promise<RevealResult> {
   const userId = await getOrCreateUser(db, input.nimAddress)
 
@@ -69,7 +69,7 @@ export async function revealEntry(
   })
   if (!stake.ok) return stake
 
-  const paragraph = await getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
+  const paragraph = await getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty, input.language ?? 'en')
   return { ok: true, paragraphId: paragraph.id, paragraphBody: paragraph.body }
 }
 
@@ -116,6 +116,7 @@ export async function createEntry(
     events: KeystrokeEvent[]
     visibility?: EntryVisibility
     allowRematch?: boolean
+    language?: Language
   },
 ): Promise<CreateEntryResult> {
   type ExistingEntry = { id: string, status: EntryStatus, expires_at: string, visibility: EntryVisibility, allow_rematch: 0 | 1 }
@@ -143,7 +144,7 @@ export async function createEntry(
   const stake = await confirmStake(db, wallet, userId, { ...input, valueLuna: stakeLuna })
   if (!stake.ok) return stake
 
-  const paragraph = await getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty)
+  const paragraph = await getOrGenerateParagraphForStake(db, input.stakeTxHash, input.difficulty, input.language ?? 'en')
   const runResult = await submitRun(db, { nimAddress: input.nimAddress, paragraphId: paragraph.id, events: input.events })
   if (!runResult.ok) {
     return { ok: false, reason: runResult.reason }

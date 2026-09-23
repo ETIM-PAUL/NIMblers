@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import type { Difficulty, MyEntry } from '../lib/api'
+import type { Difficulty, Language, MyEntry } from '../lib/api'
 import { buildDuelDeepLink, errorMessage, fetchHouseAddress, fetchMyEntries, formatAge, formatLuna, formatSeconds, readJsonOrThrow } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { parseDuelEntryId } from '../lib/duelLink'
@@ -8,6 +8,7 @@ import { buildExplorerTxLink } from '../lib/explorer'
 import { DifficultyChip } from './DifficultyChip'
 import { EmptyState } from './EmptyState'
 import { Identicon } from './Identicon'
+import { LanguageChip } from './LanguageChip'
 import { BoardIcon, OpenIcon } from './NavIcons'
 import { TypingEngine } from './TypingEngine'
 
@@ -23,6 +24,7 @@ interface OpenEntry {
   creatorAddress: string
   stakeLuna: number
   difficulty: Difficulty
+  language: Language
   createdAt: string
 }
 
@@ -315,7 +317,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                     <div className="entry-list-info">
                       <span className="entry-list-address">{entry.creatorAddress}</span>
                       <span className="entry-list-meta">
-                        <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                        <DifficultyChip difficulty={entry.difficulty} /> <LanguageChip language={entry.language} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
                       </span>
                     </div>
                     <button
@@ -350,7 +352,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                     <li key={entry.entryId} className="entry-list-item">
                       <div className="entry-list-info">
                         <span className="entry-list-meta">
-                          <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                          <DifficultyChip difficulty={entry.difficulty} /> <LanguageChip language={entry.language} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
                           {entry.visibility === 'PRIVATE' && ' · Private'}
                         </span>
                         <span className={`my-entry-status my-entry-status-${modifier}`}>{label}</span>
@@ -389,7 +391,7 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
             <div className="entry-list-info">
               <span className="entry-list-address">{entry.creatorAddress}</span>
               <span className="entry-list-meta">
-                <DifficultyChip difficulty={entry.difficulty} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
+                <DifficultyChip difficulty={entry.difficulty} /> <LanguageChip language={entry.language} /> {formatLuna(entry.stakeLuna)} · {formatAge(entry.createdAt)}
               </span>
             </div>
             <button

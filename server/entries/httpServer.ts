@@ -1,7 +1,7 @@
 import { getDb } from '../db/client.ts'
 import { readJsonBody, sendJson } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
-import { isBooleanOrUndefined, isDifficulty, isVisibilityOrUndefined, parseEvents, parseStakeBody } from '../http/validation.ts'
+import { isBooleanOrUndefined, isDifficulty, isLanguageOrUndefined, isVisibilityOrUndefined, parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from './houseWallet.ts'
 import { createEntry, DUEL_STAKE_LUNA_BY_DIFFICULTY, revealEntry } from './service.ts'
 
@@ -33,14 +33,15 @@ export function registerEntryRoutes(router: Router): void {
 
     const stakeInput = parseStakeBody(parsedBody)
     const difficulty = (parsedBody as Record<string, unknown> | null)?.difficulty
-    if (!stakeInput || !isDifficulty(difficulty)) {
-      sendJson(res, 400, { error: 'nimAddress and stakeTxHash must be strings, and difficulty must be easy, medium, or hard' })
+    const language = (parsedBody as Record<string, unknown> | null)?.language
+    if (!stakeInput || !isDifficulty(difficulty) || !isLanguageOrUndefined(language)) {
+      sendJson(res, 400, { error: 'nimAddress and stakeTxHash must be strings; difficulty must be easy, medium, or hard; language must be en, fr, or es when given' })
       return
     }
 
     try {
       const wallet = await getHouseWallet()
-      const result = await revealEntry(await getDb(), wallet, { ...stakeInput, difficulty })
+      const result = await revealEntry(await getDb(), wallet, { ...stakeInput, difficulty, language })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return
@@ -69,10 +70,15 @@ export function registerEntryRoutes(router: Router): void {
     const difficulty = body?.difficulty
     const visibility = body?.visibility
     const allowRematch = body?.allowRematch
-    if (!stakeInput || !isDifficulty(difficulty) || !isVisibilityOrUndefined(visibility) || !isBooleanOrUndefined(allowRematch)) {
+    const language = body?.language
+    if (
+      !stakeInput || !isDifficulty(difficulty) || !isVisibilityOrUndefined(visibility)
+      || !isBooleanOrUndefined(allowRematch) || !isLanguageOrUndefined(language)
+    ) {
       sendJson(res, 400, {
         error: 'nimAddress and stakeTxHash must be strings; difficulty must be easy/medium/hard; '
-          + 'visibility must be PUBLIC or PRIVATE when given; allowRematch must be a boolean when given',
+          + 'visibility must be PUBLIC or PRIVATE when given; allowRematch must be a boolean when given; '
+          + 'language must be en, fr, or es when given',
       })
       return
     }
@@ -84,7 +90,7 @@ export function registerEntryRoutes(router: Router): void {
 
     try {
       const wallet = await getHouseWallet()
-      const result = await createEntry(await getDb(), wallet, { ...stakeInput, difficulty, events, visibility, allowRematch })
+      const result = await createEntry(await getDb(), wallet, { ...stakeInput, difficulty, events, visibility, allowRematch, language })
       if (!result.ok) {
         sendJson(res, 422, { error: result.reason })
         return

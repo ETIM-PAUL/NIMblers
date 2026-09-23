@@ -7,6 +7,7 @@ function entry(overrides: Partial<DuelHistoryEntry> = {}): DuelHistoryEntry {
   return {
     entryId: 'entry',
     difficulty: 'easy',
+    language: 'en',
     stakeLuna: 100_000,
     settledAt: new Date().toISOString(),
     opponentAddress: 'opponent',

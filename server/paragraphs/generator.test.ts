@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import { generateParagraph } from './generator.ts'
 
 const DIFFICULTIES = ['easy', 'medium', 'hard'] as const
+const LANGUAGES = ['fr', 'es'] as const
 
 test('generateParagraph returns a non-empty, properly punctuated sentence for every tier', () => {
   for (const difficulty of DIFFICULTIES) {
@@ -65,5 +66,49 @@ test('a branded verb never gets a naive "s" tacked on — "verifies" not "verify
     .join(' ')
   for (const broken of ['verifys', 'rematchs', 'vanishs']) {
     assert.ok(!corpus.includes(broken), `found a broken suffix "${broken}" in generated output`)
+  }
+})
+
+test('generateParagraph produces a non-empty, properly punctuated sentence for French and Spanish too', () => {
+  for (const language of LANGUAGES) {
+    for (const difficulty of DIFFICULTIES) {
+      const body = generateParagraph(difficulty, language)
+      assert.ok(body.length > 0, `${language}/${difficulty} paragraph should not be empty`)
+      assert.match(body, /^[A-ZÀ-Ý0-9]/, `${language}/${difficulty} paragraph should start with a capital letter or digit: "${body}"`)
+      assert.match(body, /[.!?]$/, `${language}/${difficulty} paragraph should end with punctuation: "${body}"`)
+    }
+  }
+})
+
+test('French and Spanish output stays within the same basic-phone-keyboard character set as English, plus their own accented letters', () => {
+  // Same rationale as pool-data.test.ts's BASIC_KEYBOARD_CHARS: no
+  // typography a phone keyboard needs a symbol page for (em dashes, curly
+  // quotes) — but accented Latin letters ARE one long-press away on a
+  // phone's normal letter keys, unlike those, so they're allowed here.
+  const ACCENTED_LATIN_PLUS_BASIC = /^[A-Za-zÀ-ÖØ-öø-ÿ0-9 .,'"!?()%:;/@&-]*$/
+  for (const language of LANGUAGES) {
+    for (const difficulty of DIFFICULTIES) {
+      for (let i = 0; i < 10; i++) {
+        const body = generateParagraph(difficulty, language)
+        assert.match(body, ACCENTED_LATIN_PLUS_BASIC, `${language}/${difficulty} paragraph has an untypeable character: "${body}"`)
+      }
+    }
+  }
+})
+
+test('French and Spanish never misspell a z-ending adjective\'s plural — "felices"/"veloces", not "felizes"/"velozes"', () => {
+  const corpus = Array.from({ length: 100 }, () => generateParagraph('easy', 'es').toLowerCase())
+    .concat(Array.from({ length: 100 }, () => generateParagraph('medium', 'es').toLowerCase()))
+    .concat(Array.from({ length: 100 }, () => generateParagraph('hard', 'es').toLowerCase()))
+    .join(' ')
+  for (const broken of ['felizes', 'velozes', 'capazes', 'eficazes']) {
+    assert.ok(!corpus.includes(broken), `found a misspelled z-plural "${broken}" in generated Spanish output`)
+  }
+})
+
+test('generateParagraph produces different French and Spanish text across calls too', () => {
+  for (const language of LANGUAGES) {
+    const samples = new Set(Array.from({ length: 20 }, () => generateParagraph('easy', language)))
+    assert.ok(samples.size > 10, `expected mostly-unique ${language} output across 20 draws, got ${samples.size} unique values`)
   }
 })

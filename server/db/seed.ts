@@ -13,8 +13,8 @@ export async function seedParagraphPool(db: Db): Promise<void> {
   const nowIso = new Date().toISOString()
   for (const paragraph of PARAGRAPH_POOL) {
     await db.execute({
-      sql: 'INSERT OR IGNORE INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
-      args: [paragraph.id, paragraph.body, paragraph.difficulty, nowIso],
+      sql: 'INSERT OR IGNORE INTO paragraphs (id, body, difficulty, language, created_at) VALUES (?, ?, ?, ?, ?)',
+      args: [paragraph.id, paragraph.body, paragraph.difficulty, paragraph.language, nowIso],
     })
   }
 }

@@ -5,7 +5,7 @@ import type { Db } from '../db/client.ts'
 import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { getOrCreateUser } from '../db/users.ts'
-import { DEFAULT_LEADERBOARD_LIMIT, getLeaderboard, startOfWeekUtc } from './service.ts'
+import { DEFAULT_LEADERBOARD_LIMIT, getAllTimeLeaderboard, getLeaderboard, startOfWeekUtc } from './service.ts'
 
 process.env.DB_PATH = ':memory:'
 
@@ -132,4 +132,37 @@ test('getLeaderboard drops a player entirely once all their wins are from a prio
   const board = await getLeaderboard(db, DEFAULT_LEADERBOARD_LIMIT, new Date('2026-01-07T12:00:00Z'))
 
   assert.deepEqual(board, [])
+})
+
+// --- All-time ---
+
+test('getAllTimeLeaderboard includes a win no matter how long ago it settled', async () => {
+  const alice = await getOrCreateUser(db, ALICE)
+  await insertPayout(alice, 'PAYOUT', 500_000, { createdAt: '2020-01-01T00:00:00.000Z' })
+
+  const board = await getAllTimeLeaderboard(db)
+
+  assert.equal(board.length, 1)
+  assert.equal(board[0].totalWonLuna, 500_000)
+})
+
+test('getAllTimeLeaderboard sums wins across every week, not just the current one', async () => {
+  const alice = await getOrCreateUser(db, ALICE)
+  await insertPayout(alice, 'PAYOUT', 500_000, { createdAt: '2020-01-01T00:00:00.000Z' })
+  await insertPayout(alice, 'PAYOUT', 100_000, { createdAt: new Date().toISOString() })
+
+  const board = await getAllTimeLeaderboard(db)
+
+  assert.equal(board.length, 1)
+  assert.equal(board[0].totalWonLuna, 600_000)
+  assert.equal(board[0].wins, 2)
+})
+
+test('getAllTimeLeaderboard still excludes stakes, refunds, and unfulfilled payouts', async () => {
+  const alice = await getOrCreateUser(db, ALICE)
+  await insertPayout(alice, 'STAKE_RECEIVED', 100_000, { createdAt: '2020-01-01T00:00:00.000Z' })
+  await insertPayout(alice, 'REFUND', 100_000, { createdAt: '2020-01-01T00:00:00.000Z' })
+  await insertPayout(alice, 'PAYOUT', 100_000, { createdAt: '2020-01-01T00:00:00.000Z', fulfilled: false })
+
+  assert.deepEqual(await getAllTimeLeaderboard(db), [])
 })

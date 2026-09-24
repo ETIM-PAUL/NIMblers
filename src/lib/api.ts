@@ -158,6 +158,23 @@ export async function fetchWeakKeys(nimAddress: string): Promise<WeakKeyStat[]> 
   return body.weakKeys as WeakKeyStat[]
 }
 
+export interface LeaderboardEntry {
+  rank: number
+  nimAddress: string
+  totalWonLuna: number
+  wins: number
+}
+
+export type LeaderboardScope = 'weekly' | 'all-time'
+
+/** `weekly` resets every Monday 00:00 UTC; `all-time` is every payout this house wallet has ever sent, no window. */
+export async function fetchLeaderboard(scope: LeaderboardScope, limit: number): Promise<LeaderboardEntry[]> {
+  const path = scope === 'weekly' ? '/api/leaderboard' : '/api/leaderboard/all-time'
+  const res = await fetch(`${path}?limit=${limit}`)
+  const body = await readJsonOrThrow(res, 'Could not load the leaderboard')
+  return body.leaderboard as LeaderboardEntry[]
+}
+
 export function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }

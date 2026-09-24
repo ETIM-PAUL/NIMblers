@@ -29,6 +29,26 @@ export function startOfWeekUtc(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - daysSinceMonday))
 }
 
+async function rankByWinnings(db: Db, limit: number, since: Date | null): Promise<LeaderboardEntry[]> {
+  const rows = (await db.execute({
+    sql: `SELECT u.nim_address as nim_address, SUM(p.amount_luna) as total_won_luna, COUNT(*) as wins
+       FROM payouts p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.type = 'PAYOUT' AND p.tx_hash IS NOT NULL ${since ? 'AND p.created_at >= ?' : ''}
+       GROUP BY p.user_id
+       ORDER BY total_won_luna DESC, wins DESC
+       LIMIT ?`,
+    args: since ? [since.toISOString(), limit] : [limit],
+  })).rows as unknown as LeaderboardRow[]
+
+  return rows.map((row, index) => ({
+    rank: index + 1,
+    nimAddress: row.nim_address,
+    totalWonLuna: row.total_won_luna,
+    wins: row.wins,
+  }))
+}
+
 /**
  * Ranks players by NIM won *this week only* — the sum of their completed
  * `PAYOUT` rows since the last Monday-00:00-UTC reset, which already
@@ -47,21 +67,14 @@ export function startOfWeekUtc(date: Date): Date {
  * activity or losses.
  */
 export async function getLeaderboard(db: Db, limit: number = DEFAULT_LEADERBOARD_LIMIT, now: Date = new Date()): Promise<LeaderboardEntry[]> {
-  const rows = (await db.execute({
-    sql: `SELECT u.nim_address as nim_address, SUM(p.amount_luna) as total_won_luna, COUNT(*) as wins
-       FROM payouts p
-       JOIN users u ON u.id = p.user_id
-       WHERE p.type = 'PAYOUT' AND p.tx_hash IS NOT NULL AND p.created_at >= ?
-       GROUP BY p.user_id
-       ORDER BY total_won_luna DESC, wins DESC
-       LIMIT ?`,
-    args: [startOfWeekUtc(now).toISOString(), limit],
-  })).rows as unknown as LeaderboardRow[]
+  return rankByWinnings(db, limit, startOfWeekUtc(now))
+}
 
-  return rows.map((row, index) => ({
-    rank: index + 1,
-    nimAddress: row.nim_address,
-    totalWonLuna: row.total_won_luna,
-    wins: row.wins,
-  }))
+/**
+ * The same ranking, but across every `PAYOUT` this house wallet has ever
+ * sent — no time window, nothing that resets. A weekly board rewards
+ * whoever's hot right now; this one is the actual hall of fame.
+ */
+export async function getAllTimeLeaderboard(db: Db, limit: number = DEFAULT_LEADERBOARD_LIMIT): Promise<LeaderboardEntry[]> {
+  return rankByWinnings(db, limit, null)
 }

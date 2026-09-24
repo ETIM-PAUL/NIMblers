@@ -25,8 +25,10 @@ An async 1v1 speed-typing wager, built as a Nimiq Pay Mini App.
 | Every settled duel, either side of it                                      | Ranked by NIM actually won, resets weekly                                     | The stake itself always goes through Nimiq Pay's own dialog                              |
 
 
-A settlement's payout, independently verified on-chain  
-![Testnet block explorer showing the real payout transaction](docs/screenshots/explorer-tx.jpg)  
+|                                                                                                |                                                                            |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| ![Staking screen with visibility, double trial, language, and difficulty pickers](docs/screenshots/duel-setup.jpg) | ![Testnet block explorer showing the real payout transaction](docs/screenshots/explorer-tx.jpg) |
+| Public or private, English/French/Spanish, three tiers — all picked before you stake            | A settlement's payout, independently verified on-chain                     |
   
 
 

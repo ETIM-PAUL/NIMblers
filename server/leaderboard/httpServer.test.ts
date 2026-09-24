@@ -13,6 +13,7 @@ process.env.DB_PATH = ':memory:'
 
 const ALICE = 'NQ07 ALIC EAAA AAAA AAAA AAAA AAAA AAAA AAAA'
 const BOB = 'NQ07 BOBB AAAA AAAA AAAA AAAA AAAA AAAA AAAA'
+const CAROL = 'NQ07 CARO LAAA AAAA AAAA AAAA AAAA AAAA AAAA'
 
 let server: Server
 let baseUrl: string
@@ -76,4 +77,32 @@ test('GET /api/leaderboard ignores a bogus limit and falls back to the default',
   assert.equal(res.status, 200)
   const body = (await res.json()) as { leaderboard: unknown[] }
   assert.equal(body.leaderboard.length, 2)
+})
+
+test('GET /api/leaderboard/all-time includes a win from long before this week, which the weekly board excludes', async () => {
+  const db = await getDb()
+  const carol = await getOrCreateUser(db, CAROL)
+  await db.execute({
+    sql: `INSERT INTO payouts (id, idempotency_key, user_id, type, amount_luna, tx_hash, created_at)
+     VALUES (?, ?, ?, 'PAYOUT', ?, ?, ?)`,
+    args: [randomUUID(), randomUUID(), carol, 50_000, `tx-${randomUUID()}`, '2020-01-01T00:00:00.000Z'],
+  })
+
+  const weeklyRes = await fetch(`${baseUrl}/api/leaderboard`)
+  const weeklyBody = (await weeklyRes.json()) as { leaderboard: { nimAddress: string }[] }
+  assert.ok(!weeklyBody.leaderboard.some((e) => e.nimAddress === CAROL), 'the weekly board should not include a win from 2020')
+
+  const allTimeRes = await fetch(`${baseUrl}/api/leaderboard/all-time`)
+  assert.equal(allTimeRes.status, 200)
+  const allTimeBody = (await allTimeRes.json()) as { leaderboard: { nimAddress: string, totalWonLuna: number }[] }
+  assert.equal(allTimeBody.leaderboard.length, 3)
+  const carolEntry = allTimeBody.leaderboard.find((e) => e.nimAddress === CAROL)
+  assert.ok(carolEntry, 'the all-time board should include the 2020 win')
+  assert.equal(carolEntry.totalWonLuna, 50_000)
+})
+
+test('GET /api/leaderboard/all-time?limit=1 respects the limit', async () => {
+  const res = await fetch(`${baseUrl}/api/leaderboard/all-time?limit=1`)
+  const body = (await res.json()) as { leaderboard: unknown[] }
+  assert.equal(body.leaderboard.length, 1)
 })

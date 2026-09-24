@@ -144,6 +144,20 @@ export async function fetchDuelHistory(nimAddress: string): Promise<DuelHistoryR
   return { history: body.history as DuelHistoryEntry[], badges: body.badges as EarnedBadge[] }
 }
 
+export interface WeakKeyStat {
+  key: string
+  mistakes: number
+  occurrences: number
+  mistakeRate: number
+}
+
+/** The characters this address most often types wrong and then corrects, ranked by mistake rate — see server/runs/weakKeys.ts. */
+export async function fetchWeakKeys(nimAddress: string): Promise<WeakKeyStat[]> {
+  const res = await fetch(`/api/runs/weak-keys?nimAddress=${encodeURIComponent(nimAddress)}`)
+  const body = await readJsonOrThrow(res, 'Could not load your weak keys')
+  return body.weakKeys as WeakKeyStat[]
+}
+
 export function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }

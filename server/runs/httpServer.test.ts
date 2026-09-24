@@ -79,3 +79,55 @@ test('unknown routes return 404', async () => {
   const res = await fetch(`${baseUrl}/api/nonsense`)
   assert.equal(res.status, 404)
 })
+
+test('GET /api/runs/weak-keys 400s without a nimAddress', async () => {
+  const res = await fetch(`${baseUrl}/api/runs/weak-keys`)
+  assert.equal(res.status, 400)
+})
+
+test('GET /api/runs/weak-keys returns an empty list for an address with no runs', async () => {
+  const res = await fetch(`${baseUrl}/api/runs/weak-keys?nimAddress=NQ-nobody`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { weakKeys: unknown[] }
+  assert.deepEqual(body.weakKeys, [])
+})
+
+test('GET /api/runs/weak-keys surfaces a character mistyped-then-corrected in a real submitted run', async () => {
+  const heatmapTarget = 'aaaaa bbbbb'
+  const heatmapParagraphId = 'http-test-paragraph-heatmap'
+  const db = await getDb()
+  await db.execute({
+    sql: 'INSERT INTO paragraphs (id, body, difficulty, created_at) VALUES (?, ?, ?, ?)',
+    args: [heatmapParagraphId, heatmapTarget, 'easy', new Date().toISOString()],
+  })
+
+  // Types a wrong character first, backspaces it, then types the real
+  // first letter ('a') correctly — followed by the rest of the target
+  // typed cleanly.
+  let t = -150
+  let typed = ''
+  const events: { key: string, tRelativeMs: number, resultingLength: number }[] = []
+  typed += 'z'
+  events.push({ key: 'z', tRelativeMs: (t += 150), resultingLength: typed.length })
+  typed = typed.slice(0, -1)
+  events.push({ key: 'Backspace', tRelativeMs: (t += 150), resultingLength: typed.length })
+  for (const char of heatmapTarget) {
+    typed += char
+    events.push({ key: char, tRelativeMs: (t += 150), resultingLength: typed.length })
+  }
+
+  const submitRes = await fetch(`${baseUrl}/api/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nimAddress: 'NQ-weak-keys-player', paragraphId: heatmapParagraphId, events }),
+  })
+  assert.equal(submitRes.status, 201, await submitRes.text())
+
+  const res = await fetch(`${baseUrl}/api/runs/weak-keys?nimAddress=NQ-weak-keys-player`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { weakKeys: { key: string, mistakes: number, occurrences: number, mistakeRate: number }[] }
+  const a = body.weakKeys.find((w) => w.key === 'a')
+  assert.ok(a, `expected 'a' in ${JSON.stringify(body.weakKeys)}`)
+  assert.equal(a.mistakes, 1)
+  assert.equal(a.occurrences, 5)
+})

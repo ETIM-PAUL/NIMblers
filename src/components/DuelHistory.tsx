@@ -5,6 +5,7 @@ import { DifficultyChip } from './DifficultyChip'
 import { EmptyState } from './EmptyState'
 import { LanguageChip } from './LanguageChip'
 import { HistoryIcon } from './NavIcons'
+import { WeakKeysCard } from './WeakKeysCard'
 
 interface Props {
   address: string
@@ -57,6 +58,7 @@ export function DuelHistory({ address }: Props) {
     return (
       <>
         {refreshButton}
+        <WeakKeysCard address={address} />
         <p className="address-card-error">{error}</p>
       </>
     )
@@ -66,6 +68,7 @@ export function DuelHistory({ address }: Props) {
     return (
       <>
         {refreshButton}
+        <WeakKeysCard address={address} />
         <EmptyState icon={<HistoryIcon />} title="No finished duels yet" subtitle="Wins, losses, and ties will show up here once a duel settles." />
       </>
     )
@@ -74,6 +77,7 @@ export function DuelHistory({ address }: Props) {
   return (
     <>
       {refreshButton}
+      <WeakKeysCard address={address} />
       <BadgeRow badges={result.badges} />
       <ul className="entry-list">
         {result.history.map((entry) => (

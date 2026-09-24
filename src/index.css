@@ -105,6 +105,34 @@ button {
   background-repeat: no-repeat;
 }
 
+.app-crash {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app-crash-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.app-crash-message {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin: 0;
+  word-break: break-word;
+}
+
 /* The landing page is viewed in a regular desktop browser, unlike the rest
    of the app (which only ever runs inside Nimiq Pay's phone-shaped webview)
    — it shouldn't be capped to phone width. */
@@ -658,6 +686,67 @@ button {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+.weak-keys-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.weak-keys-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.weak-keys-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.weak-keys-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.weak-keys-key {
+  min-width: 20px;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+}
+
+.weak-keys-bar-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  overflow: hidden;
+}
+
+.weak-keys-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--danger-bright), var(--danger));
+  border-radius: 999px;
+}
+
+.weak-keys-rate {
+  min-width: 34px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
 }
 
 .badge-pill {

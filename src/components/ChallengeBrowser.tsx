@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeystrokeRun } from '../../shared/timingEngine'
-import type { Difficulty, Language, MyEntry } from '../lib/api'
-import { buildDuelDeepLink, errorMessage, fetchHouseAddress, fetchMyEntries, formatAge, formatLuna, formatSeconds, readJsonOrThrow } from '../lib/api'
+import type { Difficulty, Language, MyEntry, MyGroupDuel } from '../lib/api'
+import { buildDuelDeepLink, buildGroupDuelDeepLink, errorMessage, fetchHouseAddress, fetchMyEntries, fetchMyGroupDuels, formatAge, formatLuna, formatSeconds, readJsonOrThrow } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { parseDuelEntryId } from '../lib/duelLink'
 import { buildExplorerTxLink } from '../lib/explorer'
@@ -17,6 +17,8 @@ interface Props {
   sendPayment: (recipient: string, valueLuna: number) => Promise<string>
   /** Set when the app was opened via a private duel's shared link — skips browsing and jumps straight to that one entry. */
   presetEntryId?: string
+  /** Switches to the Group tab and opens this group duel's code — see App.tsx's `openGroupDuelTab`. */
+  onOpenGroupDuel: (code: string) => void
 }
 
 interface OpenEntry {
@@ -69,13 +71,16 @@ function myEntryStatus(entry: MyEntry): { label: string, modifier: string } {
   return { label: 'Tied — refunded', modifier: 'neutral' }
 }
 
-export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props) {
+export function ChallengeBrowser({ address, sendPayment, presetEntryId, onOpenGroupDuel }: Props) {
   const [stage, setStage] = useState<Stage>(presetEntryId ? { name: 'loading-invite' } : { name: 'browsing' })
-  const [browseTab, setBrowseTab] = useState<'open' | 'mine'>('open')
+  const [browseTab, setBrowseTab] = useState<'open' | 'mine' | 'group'>('open')
   const [entries, setEntries] = useState<OpenEntry[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [myEntries, setMyEntries] = useState<MyEntry[] | null>(null)
   const [myEntriesError, setMyEntriesError] = useState<string | null>(null)
+  const [myGroupDuels, setMyGroupDuels] = useState<MyGroupDuel[] | null>(null)
+  const [myGroupDuelsError, setMyGroupDuelsError] = useState<string | null>(null)
+  const [copiedGroupCode, setCopiedGroupCode] = useState<string | null>(null)
   const [pastedLink, setPastedLink] = useState('')
   const [pastedLinkError, setPastedLinkError] = useState<string | null>(null)
   const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null)
@@ -111,11 +116,31 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
     }
   }, [address])
 
+  const loadMyGroupDuels = useCallback(async () => {
+    try {
+      setMyGroupDuels(await fetchMyGroupDuels(address))
+      setMyGroupDuelsError(null)
+    }
+    catch (error) {
+      setMyGroupDuelsError(errorMessage(error))
+    }
+  }, [address])
+
   useEffect(() => {
     if (stage.name !== 'browsing') return
     if (browseTab === 'open') void loadEntries()
-    else void loadMyEntries()
-  }, [stage.name, browseTab, loadEntries, loadMyEntries])
+    else if (browseTab === 'mine') void loadMyEntries()
+    else void loadMyGroupDuels()
+  }, [stage.name, browseTab, loadEntries, loadMyEntries, loadMyGroupDuels])
+
+  async function handleCopyMyGroupLink(code: string) {
+    const link = buildGroupDuelDeepLink(code)
+    const input = copyFallbackRef.current
+    if (input) input.value = link
+    const copied = await copyText(link, input)
+    setCopiedGroupCode(copied ? code : null)
+    if (copied) setTimeout(() => setCopiedGroupCode((current) => (current === code ? null : current)), 1200)
+  }
 
   const loadInvite = useCallback(async (entryId: string) => {
     setStage({ name: 'loading-invite' })
@@ -313,6 +338,13 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
           >
             My duels
           </button>
+          <button
+            type="button"
+            className={`btn btn-toggle ${browseTab === 'group' ? 'btn-toggle-active' : ''}`}
+            onClick={() => setBrowseTab('group')}
+          >
+            Group duels
+          </button>
         </div>
 
         {browseTab === 'open' && (
@@ -381,6 +413,42 @@ export function ChallengeBrowser({ address, sendPayment, presetEntryId }: Props)
                     </li>
                   )
                 })}
+              </ul>
+            )}
+          </>
+        )}
+
+        {browseTab === 'group' && (
+          <>
+            <button type="button" className="btn btn-secondary refresh-btn" onClick={() => void loadMyGroupDuels()}>
+              Refresh
+            </button>
+            {myGroupDuelsError && <p className="address-card-error">{myGroupDuelsError}</p>}
+            {myGroupDuels === null && !myGroupDuelsError && <p className="section-note">Loading your group duels…</p>}
+            {myGroupDuels !== null && myGroupDuels.length === 0 && (
+              <EmptyState icon={<OpenIcon />} title="No group duels yet" subtitle="Create one from the Group tab to see it here." />
+            )}
+            {myGroupDuels !== null && myGroupDuels.length > 0 && (
+              <ul className="entry-list">
+                {myGroupDuels.map((gd) => (
+                  <li key={gd.groupDuelId} className="entry-list-item">
+                    <div className="entry-list-info">
+                      <span className="entry-list-address">{gd.code}{gd.isHost && ' · you host'}</span>
+                      <span className="entry-list-meta">
+                        <DifficultyChip difficulty={gd.difficulty} /> <LanguageChip language={gd.language} /> {formatLuna(gd.stakeLuna)} · {gd.joinedCount}/{gd.maxParticipants} joined · {formatAge(gd.createdAt)}
+                        {gd.status !== 'OPEN' && ` · ${gd.status === 'SETTLED' ? 'Resolved' : 'Expired'}`}
+                      </span>
+                    </div>
+                    {gd.status === 'OPEN' && (
+                      <button type="button" className="btn btn-tinted" onClick={() => void handleCopyMyGroupLink(gd.code)}>
+                        {copiedGroupCode === gd.code ? 'Copied!' : 'Copy link'}
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-primary" onClick={() => onOpenGroupDuel(gd.code)}>
+                      Open
+                    </button>
+                  </li>
+                ))}
               </ul>
             )}
           </>

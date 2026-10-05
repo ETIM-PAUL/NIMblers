@@ -44,6 +44,18 @@ export function BoardIcon() {
   )
 }
 
+/** Three small circles around a center — a group of racers. The Group Duels tab. */
+export function GroupIcon() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="6" r="2.2" />
+      <circle cx="6" cy="16" r="2.2" />
+      <circle cx="18" cy="16" r="2.2" />
+      <path d="M12 8.2V11M6 13.8V11h6v2.8M18 13.8V11h-6" />
+    </IconBase>
+  )
+}
+
 /** A clock face with hands pointing back — the History tab. */
 export function HistoryIcon() {
   return (

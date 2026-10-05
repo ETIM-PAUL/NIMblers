@@ -309,6 +309,9 @@ export function DuelPanel({ address, sendPayment }: Props) {
       >
         Try again
       </button>
+      <button type="button" className="btn btn-secondary" onClick={startAnotherDuel}>
+        Back — pick a different difficulty or mode
+      </button>
     </div>
   )
 }

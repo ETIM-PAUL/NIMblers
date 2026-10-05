@@ -495,6 +495,11 @@ button {
   background: linear-gradient(160deg, var(--danger-bright), var(--danger));
 }
 
+/* Group Duels' difficulty picker is a persistent choice (confirmed by a separate "Create" tap), unlike DuelPanel's instant-stake buttons — so a selected tier needs its own indicator rather than losing its gradient to .btn-toggle-active's flat color. */
+.btn-difficulty-selected {
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--accent), var(--shadow-md);
+}
+
 .visibility-picker {
   display: flex;
   gap: 8px;

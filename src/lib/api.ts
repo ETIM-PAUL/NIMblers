@@ -1,4 +1,5 @@
 import { DUEL_QUERY_PARAM } from './duelLink.ts'
+import { GROUP_DUEL_QUERY_PARAM } from './groupDuelLink.ts'
 
 export type Difficulty = 'easy' | 'medium' | 'hard'
 
@@ -173,6 +174,80 @@ export async function fetchLeaderboard(scope: LeaderboardScope, limit: number): 
   const res = await fetch(`${path}?limit=${limit}`)
   const body = await readJsonOrThrow(res, 'Could not load the leaderboard')
   return body.leaderboard as LeaderboardEntry[]
+}
+
+/** Same shape as `buildDuelDeepLink`, but for a group duel's shareable code — see App.tsx's `presetGroupDuelCode`. */
+export function buildGroupDuelDeepLink(code: string): string {
+  const miniAppUrl = new URL(window.location.origin + window.location.pathname)
+  miniAppUrl.searchParams.set(GROUP_DUEL_QUERY_PARAM, code)
+  return miniAppUrl.toString()
+}
+
+export interface MyGroupDuel {
+  code: string
+  groupDuelId: string
+  difficulty: Difficulty
+  language: Language
+  stakeLuna: number
+  maxParticipants: number
+  joinedCount: number
+  status: 'OPEN' | 'SETTLED' | 'EXPIRED'
+  createdAt: string
+  expiresAt: string
+  isHost: boolean
+  youJoined: boolean
+  youSubmitted: boolean
+}
+
+/** Every group duel this address created or joined — the way back to one without its code/link, even for the host. */
+export async function fetchMyGroupDuels(nimAddress: string): Promise<MyGroupDuel[]> {
+  const res = await fetch(`/api/group-duels/mine?nimAddress=${encodeURIComponent(nimAddress)}`)
+  const body = await readJsonOrThrow(res, 'Could not load your group duels')
+  return body.groupDuels as MyGroupDuel[]
+}
+
+export interface GroupDuelPreview {
+  code: string
+  difficulty: Difficulty
+  language: Language
+  stakeLuna: number
+  maxParticipants: number
+  joinedCount: number
+  status: 'OPEN' | 'SETTLED' | 'EXPIRED'
+  expiresAt: string
+  /** Set only when a nimAddress was passed in — whether THIS address already has a slot, and if so, whether it's already submitted. Must gate the "Join & stake" button: re-joining would mean a real second payment the backend has nothing to refund it against. */
+  you: { joined: true, groupDuelId: string, submitted: boolean } | { joined: false } | null
+}
+
+/** What a join screen shows before staking — stake amount and slots, never the paragraph. Pass `nimAddress` once connected so an already-joined caller can be routed to "continue" instead of "join" again. */
+export async function fetchGroupDuelPreview(code: string, nimAddress?: string): Promise<GroupDuelPreview> {
+  const params = new URLSearchParams({ code })
+  if (nimAddress) params.set('nimAddress', nimAddress)
+  const res = await fetch(`/api/group-duels/preview?${params.toString()}`)
+  const body = await readJsonOrThrow(res, 'Could not find that group duel')
+  return body as unknown as GroupDuelPreview
+}
+
+export interface GroupDuelResultRow {
+  address: string
+  /** Null for a forfeiter — they never finished, so there's no rank to show. */
+  rank: number | null
+  durationMs: number | null
+  payoutLuna: number
+  forfeited: boolean
+}
+
+export type GroupDuelStatusResult =
+  | { resolved: false, joinedCount: number, maxParticipants: number, expiresAt: string, youSubmitted: boolean }
+  | { resolved: true, settledAt: string, results: GroupDuelResultRow[] }
+
+/** Polled while waiting for a group duel to resolve — carries no individual time until `resolved` is true, the group's own version of "never reveal before it's decided." */
+export async function fetchGroupDuelStatus(groupDuelId: string, nimAddress?: string): Promise<GroupDuelStatusResult> {
+  const params = new URLSearchParams({ groupDuelId })
+  if (nimAddress) params.set('nimAddress', nimAddress)
+  const res = await fetch(`/api/group-duels/status?${params.toString()}`)
+  const body = await readJsonOrThrow(res, 'Could not load this group duel')
+  return body as unknown as GroupDuelStatusResult
 }
 
 export function formatSeconds(ms: number): string {

@@ -3,7 +3,7 @@ import { readJsonBody, sendJson, getQueryParams } from '../http/router.ts'
 import type { Router } from '../http/router.ts'
 import { isDifficulty, isLanguageOrUndefined, isPositiveInteger, parseEvents, parseStakeBody } from '../http/validation.ts'
 import { getHouseWallet } from '../entries/houseWallet.ts'
-import { createGroupDuel, getGroupDuelPreview, getGroupDuelStatus, joinGroupDuel, submitGroupRun } from './service.ts'
+import { createGroupDuel, getGroupDuelPreview, getGroupDuelStatus, joinGroupDuel, listMyGroupDuels, submitGroupRun } from './service.ts'
 
 /**
  * Registers the group-duel flow: create (host configures, gets a code),
@@ -49,14 +49,34 @@ export function registerGroupDuelRoutes(router: Router): void {
     }
   })
 
+  // Every group duel this address created or joined — the only way back
+  // to one without its code/link, including for the host who never
+  // staked a copy of it anywhere else.
+  router.get('/api/group-duels/mine', async (req, res) => {
+    const nimAddress = getQueryParams(req).get('nimAddress')
+    if (!nimAddress) {
+      sendJson(res, 400, { error: 'nimAddress query param is required' })
+      return
+    }
+    try {
+      const groupDuels = await listMyGroupDuels(await getDb(), nimAddress)
+      sendJson(res, 200, { groupDuels })
+    }
+    catch (error) {
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) })
+    }
+  })
+
   router.get('/api/group-duels/preview', async (req, res) => {
-    const code = getQueryParams(req).get('code')
+    const params = getQueryParams(req)
+    const code = params.get('code')
+    const nimAddress = params.get('nimAddress') ?? undefined
     if (!code) {
       sendJson(res, 400, { error: 'code query param is required' })
       return
     }
     try {
-      const result = await getGroupDuelPreview(await getDb(), code)
+      const result = await getGroupDuelPreview(await getDb(), code, nimAddress)
       if (!result.ok) {
         sendJson(res, 404, { error: result.reason })
         return

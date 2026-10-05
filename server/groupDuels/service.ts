@@ -93,6 +93,59 @@ export async function createGroupDuel(
   throw new Error('failed to generate a unique group duel code after several attempts')
 }
 
+export interface MyGroupDuelSummary {
+  code: string
+  groupDuelId: string
+  difficulty: Difficulty
+  language: Language
+  stakeLuna: number
+  maxParticipants: number
+  joinedCount: number
+  status: GroupDuelStatus
+  createdAt: string
+  expiresAt: string
+  isHost: boolean
+  youJoined: boolean
+  youSubmitted: boolean
+}
+
+/**
+ * Every group duel this address created or joined, newest first — the
+ * only way back to one without the code/link, same role `listMyEntries`
+ * plays for 1v1 entries. A single `LEFT JOIN` constrained to this user's
+ * own id finds both: the host row always matches on `host_user_id`, and a
+ * joined-but-not-hosting row matches because the join only succeeds for
+ * `ge.user_id = ?`, so `ge.id IS NOT NULL` alone is enough to pick it up
+ * without a second query to union against.
+ */
+export async function listMyGroupDuels(db: Db, nimAddress: string): Promise<MyGroupDuelSummary[]> {
+  const userId = await getOrCreateUser(db, nimAddress)
+  const rows = (await db.execute({
+    sql: `SELECT gd.*, ge.id as my_entry_id, ge.keystroke_run_id as my_run_id
+       FROM group_duels gd
+       LEFT JOIN group_entries ge ON ge.group_duel_id = gd.id AND ge.user_id = ?
+       WHERE gd.host_user_id = ? OR ge.id IS NOT NULL
+       ORDER BY gd.created_at DESC`,
+    args: [userId, userId],
+  })).rows as unknown as (GroupDuelRow & { my_entry_id: string | null, my_run_id: string | null })[]
+
+  return rows.map((row) => ({
+    code: row.code,
+    groupDuelId: row.id,
+    difficulty: row.difficulty,
+    language: row.language,
+    stakeLuna: row.stake_luna,
+    maxParticipants: row.max_participants,
+    joinedCount: row.joined_count,
+    status: row.status,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    isHost: row.host_user_id === userId,
+    youJoined: row.my_entry_id !== null,
+    youSubmitted: row.my_run_id !== null,
+  }))
+}
+
 export interface GroupDuelPreview {
   code: string
   difficulty: Difficulty
@@ -102,12 +155,36 @@ export interface GroupDuelPreview {
   joinedCount: number
   status: GroupDuelStatus
   expiresAt: string
+  /**
+   * Set only when `nimAddress` is passed in. The join UI must never let an
+   * already-joined caller hit the "Join & stake" button again: unlike
+   * `confirmStake`'s usual retry story (the same stake tx resubmitted after
+   * a dropped response), a second genuine tap here would mean a brand-new
+   * on-chain payment — and `joinGroupDuel` returns the existing entry on
+   * sight of one without ever looking at that new stake hash, so a second
+   * real payment would just vanish with nothing to refund it against. A
+   * caller who already has an entry gets routed to "continue" (typing, if
+   * they haven't submitted yet) instead of back through staking.
+   */
+  you: { joined: true, groupDuelId: string, submitted: boolean } | { joined: false } | null
 }
 
 /** What a join page shows before staking — no paragraph, same "never reveal before the stake is in" rule as everything else. */
-export async function getGroupDuelPreview(db: Db, code: string): Promise<{ ok: true, preview: GroupDuelPreview } | { ok: false, reason: string }> {
+export async function getGroupDuelPreview(
+  db: Db,
+  code: string,
+  nimAddress?: string,
+): Promise<{ ok: true, preview: GroupDuelPreview } | { ok: false, reason: string }> {
   const row = await findGroupDuelByCode(db, code)
   if (!row) return { ok: false, reason: 'unknown group duel code' }
+
+  let you: GroupDuelPreview['you'] = null
+  if (nimAddress) {
+    const userId = await getOrCreateUser(db, nimAddress)
+    const entry = await findGroupEntry(db, row.id, userId)
+    you = entry ? { joined: true, groupDuelId: row.id, submitted: entry.keystroke_run_id != null } : { joined: false }
+  }
+
   return {
     ok: true,
     preview: {
@@ -119,6 +196,7 @@ export async function getGroupDuelPreview(db: Db, code: string): Promise<{ ok: t
       joinedCount: row.joined_count,
       status: row.status,
       expiresAt: row.expires_at,
+      you,
     },
   }
 }

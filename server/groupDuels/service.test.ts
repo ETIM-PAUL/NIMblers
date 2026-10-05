@@ -5,7 +5,7 @@ import { closeDb, getDb } from '../db/client.ts'
 import { migrateUp } from '../db/migrate.ts'
 import { DUEL_STAKE_LUNA_BY_DIFFICULTY } from '../entries/service.ts'
 import { runGroupDuelExpirySweep } from './expiryJob.ts'
-import { createGroupDuel, getGroupDuelPreview, getGroupDuelStatus, joinGroupDuel, submitGroupRun } from './service.ts'
+import { createGroupDuel, getGroupDuelPreview, getGroupDuelStatus, joinGroupDuel, listMyGroupDuels, submitGroupRun } from './service.ts'
 import type { HouseWallet, HouseWalletTransaction } from '../../services/escrow.ts'
 
 process.env.DB_PATH = ':memory:'
@@ -89,6 +89,35 @@ test('getGroupDuelPreview shows stake/slots but never the paragraph', async () =
 test('getGroupDuelPreview rejects an unknown code', async () => {
   const result = await getGroupDuelPreview(db, 'ZZZZZZ')
   assert.equal(result.ok, false)
+})
+
+test('getGroupDuelPreview reports whether the given address has already joined, and whether it has submitted', async () => {
+  const wallet = createFakeWallet()
+  const { created, fastJoin } = await createFull2PlayerDuel(wallet)
+
+  const notJoinedYet = await getGroupDuelPreview(db, created.code, addressFor('someone-else'))
+  assert.equal(notJoinedYet.ok, true)
+  if (notJoinedYet.ok) assert.deepEqual(notJoinedYet.preview.you, { joined: false })
+
+  const joinedNotSubmitted = await getGroupDuelPreview(db, created.code, addressFor('fast'))
+  assert.equal(joinedNotSubmitted.ok, true)
+  if (joinedNotSubmitted.ok) {
+    assert.equal(joinedNotSubmitted.preview.you?.joined, true)
+    if (joinedNotSubmitted.preview.you?.joined) assert.equal(joinedNotSubmitted.preview.you.submitted, false)
+  }
+
+  await submitGroupRun(db, wallet, { groupDuelId: fastJoin.groupDuelId, nimAddress: addressFor('fast'), events: honestEventsFor(fastJoin.paragraphBody, 100) })
+
+  const joinedAndSubmitted = await getGroupDuelPreview(db, created.code, addressFor('fast'))
+  assert.equal(joinedAndSubmitted.ok, true)
+  if (joinedAndSubmitted.ok) {
+    assert.equal(joinedAndSubmitted.preview.you?.joined, true)
+    if (joinedAndSubmitted.preview.you?.joined) assert.equal(joinedAndSubmitted.preview.you.submitted, true)
+  }
+
+  const noAddressGiven = await getGroupDuelPreview(db, created.code)
+  assert.equal(noAddressGiven.ok, true)
+  if (noAddressGiven.ok) assert.equal(noAddressGiven.preview.you, null)
 })
 
 async function createFull2PlayerDuel(wallet: ReturnType<typeof createFakeWallet>) {
@@ -206,6 +235,30 @@ test('if nobody ever submits, every joined stake is refunded in full with no rak
 
   assert.equal(wallet.sends.length, 2)
   for (const send of wallet.sends) assert.equal(send.valueLuna, created.stakeLuna, 'a full refund, no rake taken')
+})
+
+test('listMyGroupDuels finds a group both for its host (who never joined) and for a participant, but not for an outsider', async () => {
+  const wallet = createFakeWallet()
+  const { created, fastJoin } = await createFull2PlayerDuel(wallet)
+
+  const hostView = await listMyGroupDuels(db, addressFor('host'))
+  assert.equal(hostView.length, 1)
+  assert.equal(hostView[0].code, created.code)
+  assert.equal(hostView[0].isHost, true)
+  assert.equal(hostView[0].youJoined, false, 'the host never joined their own group in this scenario')
+
+  const participantView = await listMyGroupDuels(db, addressFor('fast'))
+  assert.equal(participantView.length, 1)
+  assert.equal(participantView[0].isHost, false)
+  assert.equal(participantView[0].youJoined, true)
+  assert.equal(participantView[0].youSubmitted, false)
+
+  await submitGroupRun(db, wallet, { groupDuelId: fastJoin.groupDuelId, nimAddress: addressFor('fast'), events: honestEventsFor(fastJoin.paragraphBody, 100) })
+  const afterSubmit = await listMyGroupDuels(db, addressFor('fast'))
+  assert.equal(afterSubmit[0].youSubmitted, true)
+
+  const outsiderView = await listMyGroupDuels(db, addressFor('nobody'))
+  assert.equal(outsiderView.length, 0)
 })
 
 test('the expiry sweep is idempotent — running it twice never pays twice', async () => {

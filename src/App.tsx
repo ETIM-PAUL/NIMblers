@@ -4,18 +4,21 @@ import { ChallengeBrowser } from './components/ChallengeBrowser'
 import { ConnectionBanner } from './components/ConnectionBanner'
 import { DuelHistory } from './components/DuelHistory'
 import { DuelPanel } from './components/DuelPanel'
+import { GroupDuelPanel } from './components/GroupDuelPanel'
 import { Leaderboard } from './components/Leaderboard'
 import { LandingPage } from './components/LandingPage'
-import { AppLogo, BoardIcon, DuelIcon, HistoryIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
+import { AppLogo, BoardIcon, DuelIcon, GroupIcon, HistoryIcon, OpenIcon, PracticeIcon } from './components/NavIcons'
 import { PracticePanel } from './components/PracticePanel'
 import { DUEL_QUERY_PARAM } from './lib/duelLink'
+import { GROUP_DUEL_QUERY_PARAM } from './lib/groupDuelLink'
 import { useNimiq } from './lib/useNimiq'
 
-const TABS = ['duel', 'open', 'history', 'practice', 'leaderboard'] as const
+const TABS = ['duel', 'group', 'open', 'history', 'practice', 'leaderboard'] as const
 type Tab = typeof TABS[number]
 
 const TAB_ICONS: Record<Tab, React.ReactNode> = {
   duel: <DuelIcon />,
+  group: <GroupIcon />,
   open: <OpenIcon />,
   history: <HistoryIcon />,
   practice: <PracticeIcon />,
@@ -38,7 +41,17 @@ function App() {
   // src/lib/api.ts's buildDuelDeepLink) instead of the public browse list.
   // Read once — the param that opened this session doesn't change later.
   const [presetEntryId] = useState(() => new URLSearchParams(window.location.search).get(DUEL_QUERY_PARAM) ?? undefined)
-  const [activeTab, setActiveTab] = useState<Tab>(presetEntryId ? 'open' : 'duel')
+  // Unlike presetEntryId, this one isn't fixed at mount: the Open tab's
+  // "Group duels" list can also jump here mid-session (see
+  // `openGroupDuelTab`), when the user already has the code from having
+  // created or joined that group earlier — not just from a shared link.
+  const [presetGroupDuelCode, setPresetGroupDuelCode] = useState(() => new URLSearchParams(window.location.search).get(GROUP_DUEL_QUERY_PARAM) ?? undefined)
+  const [activeTab, setActiveTab] = useState<Tab>(presetEntryId ? 'open' : presetGroupDuelCode ? 'group' : 'duel')
+
+  function openGroupDuelTab(code: string) {
+    setPresetGroupDuelCode(code)
+    setActiveTab('group')
+  }
 
   // The landing page is always the first thing shown, inside Nimiq Pay or
   // not — "Launch App" is what moves past it. A shared duel link is the one
@@ -47,10 +60,11 @@ function App() {
   // ready (never before — there's nothing to launch into outside Nimiq Pay).
   const [hasLaunched, setHasLaunched] = useState(false)
   useEffect(() => {
-    if (presetEntryId && isReady) setHasLaunched(true)
-  }, [presetEntryId, isReady])
+    if ((presetEntryId || presetGroupDuelCode) && isReady) setHasLaunched(true)
+  }, [presetEntryId, presetGroupDuelCode, isReady])
   const tabLabels: Record<Tab, string> = {
     duel: 'Duel',
+    group: presetGroupDuelCode ? 'Invite' : 'Group',
     open: presetEntryId ? 'Invite' : 'Open',
     history: 'History',
     practice: 'Practice',
@@ -92,9 +106,15 @@ function App() {
             : <p className="section-note">Connect your wallet to start a duel.</p>}
         </section>
 
+        <section className="section" hidden={activeTab !== 'group'}>
+          {address
+            ? <GroupDuelPanel address={address} sendPayment={sendPayment} presetCode={presetGroupDuelCode} />
+            : <p className="section-note">Connect your wallet to {presetGroupDuelCode ? 'see this group duel' : 'start a group duel'}.</p>}
+        </section>
+
         <section className="section" hidden={activeTab !== 'open'}>
           {address
-            ? <ChallengeBrowser address={address} sendPayment={sendPayment} presetEntryId={presetEntryId} />
+            ? <ChallengeBrowser address={address} sendPayment={sendPayment} presetEntryId={presetEntryId} onOpenGroupDuel={openGroupDuelTab} />
             : <p className="section-note">Connect your wallet to {presetEntryId ? 'see this duel' : 'browse duels'}.</p>}
         </section>
 

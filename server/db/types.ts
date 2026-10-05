@@ -67,6 +67,35 @@ export interface DuelRow {
   retry_keystroke_run_id: string | null
 }
 
+export type GroupDuelStatus = 'OPEN' | 'SETTLED' | 'EXPIRED'
+
+export interface GroupDuelRow {
+  id: string
+  code: string
+  host_user_id: string
+  paragraph_id: string
+  difficulty: Difficulty
+  language: Language
+  stake_luna: number
+  max_participants: number
+  joined_count: number
+  status: GroupDuelStatus
+  created_at: string
+  expires_at: string
+  settled_at: string | null
+}
+
+export interface GroupEntryRow {
+  id: string
+  group_duel_id: string
+  user_id: string
+  stake_tx_hash: string
+  joined_at: string
+  keystroke_run_id: string | null
+  rank: number | null
+  payout_luna: number | null
+}
+
 export interface PayoutRow {
   id: string
   idempotency_key: string

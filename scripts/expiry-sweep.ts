@@ -1,6 +1,7 @@
 import { closeDb, getDb } from '../server/db/client.ts'
 import { migrateUp } from '../server/db/migrate.ts'
 import { runExpirySweep } from '../server/duels/expiryJob.ts'
+import { runGroupDuelExpirySweep } from '../server/groupDuels/expiryJob.ts'
 import { createHouseWallet } from '../services/escrow.ts'
 
 /**
@@ -36,6 +37,12 @@ async function main() {
   console.log(`Refunded ${result.refundedEntries.length} expired entr(y/ies): ${JSON.stringify(result.refundedEntries)}`)
   if (result.errors.length > 0) {
     console.log(`${result.errors.length} refund(s) failed and will retry next sweep: ${JSON.stringify(result.errors)}`)
+  }
+
+  const groupResult = await runGroupDuelExpirySweep(db, wallet)
+  console.log(`Resolved ${groupResult.resolved.length} group duel(s) past their 72h window: ${JSON.stringify(groupResult.resolved)}`)
+  if (groupResult.errors.length > 0) {
+    console.log(`${groupResult.errors.length} group duel resolution(s) failed and will retry next sweep: ${JSON.stringify(groupResult.errors)}`)
   }
 
   await wallet.close()

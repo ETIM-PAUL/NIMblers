@@ -43,3 +43,8 @@ export function isVisibilityOrUndefined(value: unknown): value is EntryVisibilit
 export function isBooleanOrUndefined(value: unknown): value is boolean | undefined {
   return value === undefined || typeof value === 'boolean'
 }
+
+/** createGroupDuel validates the actual range (2-50); this just rejects the obviously malformed before it gets there. */
+export function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+}

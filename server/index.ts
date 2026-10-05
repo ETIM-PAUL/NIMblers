@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs'
 import { getDb } from './db/client.ts'
 import { runExpirySweep } from './duels/expiryJob.ts'
+import { runGroupDuelExpirySweep } from './groupDuels/expiryJob.ts'
 import { getHouseWallet } from './entries/houseWallet.ts'
 import { createRouter, sendJson } from './http/router.ts'
 import { registerRunRoutes } from './runs/httpServer.ts'
 import { registerEntryRoutes } from './entries/httpServer.ts'
 import { registerDuelRoutes } from './duels/httpServer.ts'
+import { registerGroupDuelRoutes } from './groupDuels/httpServer.ts'
 import { registerLeaderboardRoutes } from './leaderboard/httpServer.ts'
 
 const port = Number(process.env.PORT ?? 8787)
@@ -20,6 +22,7 @@ const router = createRouter({ staticDir })
 registerRunRoutes(router)
 registerEntryRoutes(router)
 registerDuelRoutes(router)
+registerGroupDuelRoutes(router)
 registerLeaderboardRoutes(router)
 
 // Cheap, DB-free — for load balancers and an external uptime pinger (see
@@ -40,10 +43,16 @@ if (process.env.ENABLE_INPROCESS_SWEEP === 'true') {
   const SWEEP_INTERVAL_MS = 10 * 60_000
   const runSweep = async () => {
     try {
-      const result = await runExpirySweep(await getDb(), await getHouseWallet())
+      const wallet = await getHouseWallet()
+      const result = await runExpirySweep(await getDb(), wallet)
       console.log(
         `expiry sweep: released ${result.releasedLocks.length} lock(s), refunded ${result.refundedEntries.length} entr(y/ies), `
         + `settled ${result.settledAbandonedRetries.length} abandoned retr(y/ies), ${result.errors.length} error(s)`,
+      )
+
+      const groupResult = await runGroupDuelExpirySweep(await getDb(), wallet)
+      console.log(
+        `group duel sweep: resolved ${groupResult.resolved.length} group duel(s), ${groupResult.errors.length} error(s)`,
       )
     }
     catch (error) {
